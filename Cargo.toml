@@ -1,0 +1,45 @@
+[package]
+name = "mega-amm-protocol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+constant-product-curve = { git = "https://github.com/deanmlittle/constant-product-curve", version = "0.1.0" }
+pinocchio = "0.10.1"
+pinocchio-associated-token-account = "0.3.0"
+pinocchio-log = "0.5.1"
+pinocchio-pubkey = "0.3.0"
+pinocchio-system = "0.5.0"
+pinocchio-token = "0.5.0"
+pinocchio-token-2022 = "0.2.0"
+solana-address = { version = "2.0.0", features = ["curve25519"] }
+
+[features]
+default = ["std"]
+std = []
+no-entrypoint = []
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dev-dependencies]
+bincode = "1.3.3"
+litesvm = "0.9.1"
+litesvm-token = "0.9.1"
+mollusk-svm = "0.10.1"
+mollusk-svm-bencher = "0.10.1"
+mollusk-svm-programs-memo = "0.10.1"
+mollusk-svm-programs-token = "0.10.1"
+solana-account = "3.3.0"
+solana-feature-set = "2.2.5"
+solana-keypair = "3.1.0"
+solana-message = "3.0.1"
+solana-precompiles = "2.2.2"
+solana-program = "3.0.0"
+solana-pubkey = "4.0.0"
+solana-sdk = "3.0.0"
+solana-signer = "3.0.0"
+solana-system-interface = "3.0.0"
+solana-transaction = "3.0.2"
+spl-associated-token-account = "8.0.0"
+spl-token = "9.0.0"
