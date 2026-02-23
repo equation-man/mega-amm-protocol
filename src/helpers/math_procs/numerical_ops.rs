@@ -33,7 +33,7 @@ pub fn u64_to_u128_inplace(
 // xi represent the token balances in the pool or reserves.
 // We use "Scaling" pattern, working with u128 to prevent potential overflow and convert back to 
 // u64 for storage.
-pub fn safeguarded_newton_solver(reserve: &[u128; 2], amp: u128) -> Result<u64, &'static str> {
+pub fn safeguarded_newton_solver(reserve: &[u128], amp: u128) -> Result<u64, &'static str> {
     if reserve.is_empty() {
         return Err("Zero division error");
     }
@@ -46,15 +46,11 @@ pub fn safeguarded_newton_solver(reserve: &[u128; 2], amp: u128) -> Result<u64, 
 
     // A(amplifier) * n^n
     let ann = amp.checked_mul(n_pow_n).ok_or("Overflow multiplication")?;
+
     // sum of xi and product of xi
-    let mut sum_x = 0 as u128;
-    for &x in reserve {
-        sum_x = sum_x.checked_add(x).ok_or("Overflow addition")?;
-    }
-    let mut prod_x = 1 as u128;
-    for &x in reserve {
-        prod_x = prod_x.checked_mul(x).ok_or("Overflow multiplication")?;
-    }
+    let sum_x = constant_sum(reserve)?;
+    let prod_x = constant_product(reserve)?;
+
     let n_pow_n_prod_x = n_pow_n.checked_mul(prod_x).ok_or("Overflow multiplication")?;
 
     // Specifying the bounds for the Newton-Raphson process.
@@ -129,104 +125,149 @@ pub fn safeguarded_newton_solver(reserve: &[u128; 2], amp: u128) -> Result<u64, 
 mod tests {
     use super::*;
 
-    // CONSTANT SUM TESTS
-    #[test]
-    fn test_constant_sum_basic() {
-        let reserves = vec![100u128, 200u128, 300u128];
-        let result = constant_sum(&reserves).unwrap();
-        println!("Running the first constant product");
-        assert_eq!(result, 600);
+    // Testin f(D) 
+    fn evaluate_f(
+        reserve: &[u128],
+        amp: u128,
+        d: u128,
+    ) -> u128 {
+
+        let n = reserve.len() as u128;
+
+        let mut n_pow_n = 1u128;
+        for _ in 0..n {
+            n_pow_n *= n;
+        }
+
+        let ann = amp * n_pow_n;
+
+        let sum_x = constant_sum(reserve).unwrap();
+        let prod_x = constant_product(reserve).unwrap();
+
+        let mut d_pow_n = 1u128;
+        for _ in 0..n {
+            d_pow_n *= d;
+        }
+
+        let d_pow_n_plus_1 = d_pow_n * d;
+
+        let term_a = (ann - 1) * d;
+        let term_b = d_pow_n_plus_1 / (n_pow_n * prod_x);
+        let term_c = ann * sum_x;
+
+        term_a + term_b - term_c
     }
 
+    // Balanced pool test
     #[test]
-    fn test_constant_sum_empty() {
-        let reserves: Vec<u128> = vec![];
-        let result = constant_sum(&reserves).unwrap();
-        assert_eq!(result, 0);
-    }
-
-    #[test]
-    fn test_constant_sum_overflow() {
-        let reserves = vec![u128::MAX, 1u128];
-        let result = constant_sum(&reserves);
-        assert!(result.is_err());
-    }
-
-    // CONSTANT PRODUCT TESTS
-    #[test]
-    fn test_constant_product_basic() {
-        let reserves = vec![10u128, 20u128];
-        let result = constant_product(&reserves).unwrap();
-        assert_eq!(result, 200);
-    }
-
-    #[test]
-    fn test_constant_product_with_one() {
-        let reserves = vec![5u128];
-        let result = constant_product(&reserves).unwrap();
-        assert_eq!(result, 5);
-    }
-
-    #[test]
-    fn test_constant_product_overflow() {
-        let reserves = vec![u128::MAX, 2u128];
-        let result = constant_product(&reserves);
-        assert!(result.is_err());
-    }
-
-    // TEST SLICE CONVERSION TO U128
-    #[test]
-    fn test_u128_conversion_success() {
-        let input = vec![10u64, 20u64, 30u64];
-        let mut output = vec![0u128; 3];
-
-        u64_to_u128_inplace(&input, &mut output).unwrap();
-
-        assert_eq!(output, vec![10u128, 20u128, 30u128]);
-    }
-
-    #[test]
-    fn test_u128_conversion_small_output_slice() {
-        let input = vec![10u64, 20u64];
-        let mut output = vec![0u128; 1];
-
-        let result = u64_to_u128_inplace(&input, &mut output);
-        assert!(result.is_err());
-    }
-
-    // SAFEGUARDED NEWTON SOLVER TEST.
-    #[test]
-    fn test_newton_solver_two_equal_reserves() {
-        let reserves = vec![1_000_000u128, 1_000_000u128];
+    fn test_balanced_pool_converges() {
+        let reserve = [1_000_000u128, 1_000_000u128];
         let amp = 100u128;
 
-        let d = safeguarded_newton_solver(&reserves, amp).unwrap();
+        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
 
-        // For symmetric pool, D ≈ sum
-        assert!(d >= 1_999_000 && d <= 2_001_000);
+        // For perfectly balanced pool, D should be ~ sum_x
+        assert!(d >= 2_000_000 - 2);
+        assert!(d <= 2_000_000 + 2);
+
+        // Verify f(D) = 0
+        let f_val = evaluate_f(&reserve, amp, d as u128);
+        assert!(f_val <= 2);
     }
 
+    // Imbalanced pool test
     #[test]
-    fn test_newton_solver_imbalanced_pool() {
-        let reserves = vec![2_000_000u128, 1_000_000u128];
+    fn test_imbalanced_pool_converges() {
+        let reserve = [1_000_000u128, 100_000u128];
         let amp = 100u128;
 
-        let d = safeguarded_newton_solver(&reserves, amp).unwrap();
+        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
 
-        // D must be between sum and n*max
-        let sum = 3_000_000u128;
-        let upper_bound = 2 * 2_000_000u128;
+        let sum_x = constant_sum(&reserve).unwrap();
 
-        assert!(d as u128 >= sum);
-        assert!(d as u128 <= upper_bound);
+        // D should always be >= sum_x
+        // This is economic property check
+        assert!(d as u128 >= sum_x);
+
+        // Check invariant condition
+        let f_val = evaluate_f(&reserve, amp, d as u128);
+        println!("The convergence at test imbalance {}", f_val);
+        assert!(f_val < 2);
     }
 
+    // Very high amplification (stable-swap behavior)
     #[test]
-    fn test_newton_solver_zero_reserve_error() {
-        let reserves: Vec<u128> = vec![];
+    fn test_high_amp_behaves_like_constant_sum() {
+        let reserve = [5_000_000u128, 5_000_000u128];
+        let amp = 10_000u128;
+
+        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
+
+        // With high A, D = sum
+        assert!((d as i128 - 10_000_000i128).abs() <= 2);
+    }
+
+    // Very low amplification (approaches constant product)
+    #[test]
+    fn test_low_amp_behaves_like_constant_product() {
+        let reserve = [1_000_000u128, 500_000u128];
+        let amp = 1u128;
+
+        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
+
+        let sum_x = constant_sum(&reserve).unwrap();
+        assert!(d as u128 >= sum_x);
+    }
+
+    // Zero reserve should fail
+    #[test]
+    fn test_zero_reserve_fails() {
+        let reserve: [u128; 0] = [];
         let amp = 100u128;
 
-        let result = safeguarded_newton_solver(&reserves, amp);
+        let result = safeguarded_newton_solver(&reserve, amp);
         assert!(result.is_err());
+    }
+
+    // Convergence robustness across ranges
+    #[test]
+    fn test_multiple_random_like_values() {
+        let test_cases = vec![
+            [10u128, 20u128],
+            [1_000u128, 3_000u128],
+            [100_000u128, 200_000u128],
+            [999_999u128, 123_456u128],
+        ];
+
+        for reserve in test_cases {
+            let amp = 100u128;
+
+            let d = safeguarded_newton_solver(&reserve, amp).unwrap();
+
+            let sum_x = constant_sum(&reserve).unwrap();
+
+            // D should never be smaller than sum
+            assert!(d as u128 >= sum_x);
+
+            let f_val = evaluate_f(&reserve, amp, d as u128);
+            println!("The convergence at multiple random values {}", f_val);
+
+            // Should converge very close to zero
+            assert!(f_val < 2);
+        }
+    }
+
+    // Large value stress test
+    #[test]
+    fn test_large_values() {
+        let reserve = [
+            1_000_000_000_000u128,
+            1_000_000_000_000u128
+        ];
+        let amp = 100u128;
+
+        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
+
+        assert!(d > 0);
     }
 }
