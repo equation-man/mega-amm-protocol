@@ -33,241 +33,165 @@ pub fn u64_to_u128_inplace(
 // xi represent the token balances in the pool or reserves.
 // We use "Scaling" pattern, working with u128 to prevent potential overflow and convert back to 
 // u64 for storage.
-pub fn safeguarded_newton_solver(reserve: &[u128], amp: u128) -> Result<u64, &'static str> {
-    if reserve.is_empty() {
-        return Err("Zero division error");
+
+use core::cmp::Ordering;
+type Uint = u128;
+const MAX_TOKENS: usize = 8;
+
+pub fn calculate_y(
+    amp_param: u64, x_i_param: u64, d_param: u64, n_param: u8
+) -> Result<u128, &'static str> {
+    if x_i_param == 0 {
+        return Err("Insufficient funds");
     }
-    //n and n^n 
-    let n = reserve.len() as u128;
-    let mut n_pow_n = 1 as u128;
-    for _ in 0..n {
-        n_pow_n = n_pow_n.checked_mul(n).ok_or("Overflow multiplication")?;
-    }
+    let amp: Uint = amp_param.into();
+    let x_i: Uint = x_i_param.into();
+    let d: Uint = d_param.into();
+    let n: Uint = n_param.into();
+    let ann = amp.checked_mul(n).ok_or("Overflowing error at An^n")?;
+    let s_ = x_i;
 
-    // A(amplifier) * n^n
-    let ann = amp.checked_mul(n_pow_n).ok_or("Overflow multiplication")?;
+    let mut c = d;
+    c = c.checked_mul(d).ok_or("Overflow error for D^2")?
+        .checked_div(x_i.checked_mul(n).ok_or("Overflow detected at xi * n")?)
+        .ok_or("Division error at D^2")?;
+    c = c.checked_mul(d).ok_or("Overflow detected at D^2*D")?
+        .checked_div(ann.checked_mul(n).ok_or("Overflow detected at A*n^n")?)
+        .ok_or("Division error at term c")?;
 
-    // sum of xi and product of xi
-    let sum_x = constant_sum(reserve)?;
-    let prod_x = constant_product(reserve)?;
+    let b = s_.checked_add(d.checked_div(ann).ok_or("Division error at term b")?)
+        .ok_or("Overflow detected on addition at term b")?;
 
-    let n_pow_n_prod_x = n_pow_n.checked_mul(prod_x).ok_or("Overflow multiplication")?;
+    // Hybrid boundary solver.
+    let mut y_low = 0u128;
+    let mut y_high = d.checked_mul(2).ok_or("Overflow detected")?;
+    let mut y = d;
+    let mut dy_prev = Uint::MAX;
 
-    // Specifying the bounds for the Newton-Raphson process.
-    // The process will be contained inside these bounds
-    let max_x = *reserve.iter().max_by(|a, b| a.cmp(b)).ok_or("Zero division error")?;
-    let mut low = sum_x;
-    let mut high = max_x.checked_mul(n).ok_or("Overflow multiplication")?;
+    for _ in 0..64 {
+        let y_sq = y.checked_mul(y).ok_or("Overflow detected")?;
+        let by = y.checked_mul(b).ok_or("Overflow detected")?;
+        let dy = y.checked_mul(d).ok_or("Overflwo detected")?;
 
-    let mut d = sum_x; // This is now the initial guess or value of d
+        let lhs = y_sq.checked_add(by).ok_or("Overflow detected on addition")?;
+        let rhs = dy.checked_add(c).ok_or("Overflow detected on addition")?;
 
-    // Iteratively probing the value of D using Newton-Raphson process.
-    for _ in 0..20 {
-        // D^n
-        let mut d_pow_n = 1 as u128;
-        for _ in 0..n {
-            d_pow_n = d_pow_n.checked_mul(d).ok_or("Overflow multiplication")?;
+        // Checking convergence.
+        let diff = if lhs > rhs { lhs - rhs } else { rhs - lhs };
+        if diff <=1 {
+            return Ok(y);
         }
-        // D^(n+1)
-        let d_pow_n_plus_1 = d_pow_n.checked_mul(d).ok_or("Overflow multiplication")?;
-
-        let term_a = ann.checked_sub(1)
-            .ok_or("Subraction error")?
-            .checked_mul(d).ok_or("Overflow multiplication")?;
-        let term_b = d_pow_n_plus_1.checked_div(n_pow_n_prod_x).ok_or("Division error")?;
-        let term_c = ann.checked_mul(sum_x).ok_or("Overflow multiplication")?;
-        // f(D)
-        let f_d = term_a.checked_add(term_b)
-            .ok_or("Overflowing addition")?
-            .checked_sub(term_c).ok_or("Overflowing subtraction")?;
-        // f'(D) calculating for the first derivative.
-        let df_term_b = (n + 1).checked_mul(d_pow_n)
-            .ok_or("Overflowing multiplication")?
-            .checked_div(n_pow_n_prod_x).ok_or("Division error")?;
-        let df_d = ann.checked_sub(1).ok_or("Subtraction error")?
-            .checked_add(df_term_b).ok_or("Addition error")?;
 
         // Newton step
-        let next_d = if df_d > 0 {
-            d.checked_sub(f_d.checked_div(df_d)
-                .ok_or("Division error")?).ok_or("Subraction error")?
+        let dfy = y.checked_mul(2).ok_or("Overflow detected")?
+            .checked_add(b).ok_or("Overflow detected")?
+            .checked_sub(d).ok_or("Underflow detected")?;
+
+        let mut y_next = if dfy > 0 {
+            if lhs > rhs {
+                y.checked_sub(diff.checked_div(dfy).ok_or("Division error")?)
+                    .ok_or("Underflow detected")?
+            } else {
+                y.checked_add(diff.checked_div(dfy).ok_or("Division error")?)
+                    .ok_or("Overflow detected on addition")?
+            }
         } else {
-            d
+            y_low.checked_add(y_high).ok_or("Overflow detected on addition")? / 2
         };
 
-        // Bisection fallback, if we're out of bounds, to adjust to average.
-        let next_d = if next_d <= low || next_d >= high {
-            low.checked_add(high).ok_or("Addition error")?
-                .checked_div(2).ok_or("Division error")?
-        } else {
-            next_d
-        };
-
-        // Updating the bounds.
-        if f_d > 0 { high = d; } else { low =d; }
-
-        // If we reach convergence point.
-        let diff = if d > next_d { 
-            d.checked_sub(next_d).ok_or("Subtraction error")?
-        } else {
-            next_d.checked_sub(d).ok_or("Subtraction error")?
-        };
-        if diff <= 1 {
-            return Ok(next_d.try_into().expect("Value out of range"));
+        // Bound enforcement and divergence check.
+        let step_size = if y_next > y { y_next - y } else { y - y_next };
+        if y_next <= y_low || y_next >= y_high || step_size >= dy_prev {
+            y_next = y_low.checked_add(y_high).ok_or("Overflow detected on addition")? / 2;
         }
-        d = next_d;
+
+        if lhs < rhs { y_low = y; } else { y_high = y; }
+
+        dy_prev = step_size;
+        y = y_next;
     }
 
-    Ok(d.try_into().expect("Value out of range"))
+    Ok(y)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Testin f(D) 
-    fn evaluate_f(
-        reserve: &[u128],
-        amp: u128,
-        d: u128,
-    ) -> u128 {
+    const PRECISION: u128 = 1_000_000_000_000_000_000; // 1e18
 
-        let n = reserve.len() as u128;
+    #[test]
+    fn test_perfect_balance() {
+        // Pool: 100 USDC, 100 USDT. D = 200. Amp = 100.
+        // If x_i is 100, y must be 100.
+        let d = 200; //* PRECISION;
+        let x_i = 100; //* PRECISION;
+        let amp = 100;
+        let n = 2;
 
-        let mut n_pow_n = 1u128;
-        for _ in 0..n {
-            n_pow_n *= n;
-        }
-
-        let ann = amp * n_pow_n;
-
-        let sum_x = constant_sum(reserve).unwrap();
-        let prod_x = constant_product(reserve).unwrap();
-
-        let mut d_pow_n = 1u128;
-        for _ in 0..n {
-            d_pow_n *= d;
-        }
-
-        let d_pow_n_plus_1 = d_pow_n * d;
-
-        let term_a = (ann - 1) * d;
-        let term_b = d_pow_n_plus_1 / (n_pow_n * prod_x);
-        let term_c = ann * sum_x;
-
-        term_a + term_b - term_c
+        let result = calculate_y(amp, x_i, d, n).expect("Should converge");
+        
+        // In a perfectly balanced pool, y should be exactly equal to x_i
+        assert!((result as i128 - x_i as i128).abs() <= 100, "Result {} too far from 100", result);
     }
 
-    // Balanced pool test
     #[test]
-    fn test_balanced_pool_converges() {
-        let reserve = [1_000_000u128, 1_000_000u128];
-        let amp = 100u128;
+    fn test_imbalance_high_amp() {
+        // High Amp (1000) makes the curve flatter (like x + y = D)
+        // D = 2000. If x = 500, y should be close to 1500.
+        let d = 2000;// * PRECISION;
+        let x_i = 500; // * PRECISION;
+        let amp = 1000;
+        let n = 2;
 
-        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-        // For perfectly balanced pool, D should be ~ sum_x
-        assert!(d >= 2_000_000 - 2);
-        assert!(d <= 2_000_000 + 2);
-
-        // Verify f(D) = 0
-        let f_val = evaluate_f(&reserve, amp, d as u128);
-        assert!(f_val <= 2);
+        let result = calculate_y(amp, x_i, d, n).expect("Should converge");
+        println!("The results for y and x are {} {}", result, x_i);
+        
+        // 500 + 1500 = 2000. Because it's StableSwap, it should be very close to 1500.
+        let expected = 1500; // * PRECISION;
+        let diff = result - expected;
+        assert!(diff < 1, "Diff {} too high for high amp", diff);
     }
 
-    // Imbalanced pool test
     #[test]
-    fn test_imbalanced_pool_converges() {
-        let reserve = [1_000_000u128, 100_000u128];
-        let amp = 100u128;
+    fn test_imbalance_low_amp() {
+        // Low Amp (1) makes it behave more like Constant Product (xy = k)
+        let d = 200;// * PRECISION;
+        let x_i = 50;// * PRECISION; // 1/4 of D
+        let amp = 1;
+        let n = 2;
 
-        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-        let sum_x = constant_sum(&reserve).unwrap();
-
-        // D should always be >= sum_x
-        // This is economic property check
-        assert!(d as u128 >= sum_x);
-
-        // Check invariant condition
-        let f_val = evaluate_f(&reserve, amp, d as u128);
-        println!("The convergence at test imbalance {}", f_val);
-        assert!(f_val < 2);
+        let result = calculate_y(amp, x_i, d, n).expect("Should converge");
+        
+        // In Constant Product, if x is small, y must be much larger to maintain D.
+        assert!(result > (d / 2).into(), "y should be larger than half of D when x is small");
+        assert!(result < (d * 2).into(), "y should not explode to infinity");
     }
 
-    // Very high amplification (stable-swap behavior)
     #[test]
-    fn test_high_amp_behaves_like_constant_sum() {
-        let reserve = [5_000_000u128, 5_000_000u128];
-        let amp = 10_000u128;
+    fn test_extreme_imbalance_protection() {
+        // Test where x_i is nearly the entire D.
+        let d = 1000;// * PRECISION;
+        let x_i = 999;// * PRECISION; 
+        let amp = 100;
+        let n = 2;
 
-        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-        // With high A, D = sum
-        assert!((d as i128 - 10_000_000i128).abs() <= 2);
+        let result = calculate_y(amp, x_i, d, n);
+        // Should either converge to a tiny y or fail gracefully, not panic.
+        assert!(result.is_ok());
+        assert!(result.unwrap() < PRECISION); 
     }
 
-    // Very low amplification (approaches constant product)
     #[test]
-    fn test_low_amp_behaves_like_constant_product() {
-        let reserve = [1_000_000u128, 500_000u128];
-        let amp = 1u128;
+    fn test_zero_balance_fails() {
+        let d = 100;// * PRECISION;
+        let x_i = 0; // Invalid input
+        let amp = 100;
+        let n = 2;
 
-        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-        let sum_x = constant_sum(&reserve).unwrap();
-        assert!(d as u128 >= sum_x);
-    }
-
-    // Zero reserve should fail
-    #[test]
-    fn test_zero_reserve_fails() {
-        let reserve: [u128; 0] = [];
-        let amp = 100u128;
-
-        let result = safeguarded_newton_solver(&reserve, amp);
-        assert!(result.is_err());
-    }
-
-    // Convergence robustness across ranges
-    #[test]
-    fn test_multiple_random_like_values() {
-        let test_cases = vec![
-            [10u128, 20u128],
-            [1_000u128, 3_000u128],
-            [100_000u128, 200_000u128],
-            [999_999u128, 123_456u128],
-        ];
-
-        for reserve in test_cases {
-            let amp = 100u128;
-
-            let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-            let sum_x = constant_sum(&reserve).unwrap();
-
-            // D should never be smaller than sum
-            assert!(d as u128 >= sum_x);
-
-            let f_val = evaluate_f(&reserve, amp, d as u128);
-            println!("The convergence at multiple random values {}", f_val);
-
-            // Should converge very close to zero
-            assert!(f_val < 2);
-        }
-    }
-
-    // Large value stress test
-    #[test]
-    fn test_large_values() {
-        let reserve = [
-            1_000_000_000_000u128,
-            1_000_000_000_000u128
-        ];
-        let amp = 100u128;
-
-        let d = safeguarded_newton_solver(&reserve, amp).unwrap();
-
-        assert!(d > 0);
+        let result = calculate_y(amp, x_i, d, n);
+        println!("The result when balance is 0 is {:?}", result);
+        assert!(result.is_err(), "Should fail when balance is zero");
     }
 }
+

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 constant-product-curve = { git = "https://github.com/deanmlittle/constant-product-curve", version = "0.1.0" }
+ethnum = "1.5.2"
 pinocchio = "0.10.1"
 pinocchio-associated-token-account = "0.3.0"
 pinocchio-log = "0.5.1"
