@@ -1,5 +1,6 @@
 # Mega AMM protocol.
 ##### Technologies: Rust, Solana, Pinocchio  
+[*Inside DeFi protocols beyond the AMM curves. Engineering StableSwap invariant*](https://medium.com/@EquationManTheBlueBeetle/inside-defi-protocols-beyond-the-amm-curves-engineering-the-stableswap-invariant-in-rust-560eb8b21706)  
 
 ## Overview:  
 This is a high performance Automated Market Maker (AMM) supporting two-token liquidity pools with full 
@@ -10,6 +11,8 @@ Consider mathematical representation F(x, y) = k, where x is the reserve for tok
 the reserve for token B, k is the invariant.  
 The curve represents all possible (x, y) combinations that preseves or satisfies this invariant, hence, 
 F(x, y) = k, for CPMM(constant product market maker) like this we have, x*y = k.   
+You can find more about this in the medium article [Inside DeFi protocols beyond the AMM curves. Engineering StableSwap invariant](https://medium.com/@EquationManTheBlueBeetle/inside-defi-protocols-beyond-the-amm-curves-engineering-the-stableswap-invariant-in-rust-560eb8b21706)  
+  
 
 ## Features:  
 - Permissionless pool creation. Anyone can create liquidity in the pool without any approval.
@@ -25,10 +28,10 @@ The AMM is initialized with necessary configurations, and the pool, which belong
 program.
 
 #### Deposit  
-Depositors can deposit supported token pairs to the pool and receive the LP tokens.  
-- They enter amount of LP tokens they want.
-- Specify maximum x for token A and y for token B, for slippage protection, and time bounds.
-- Deposited Tokens are then transferred in exchange for the LP tokens for them.
+Here the system solves for invariant new D using Newton solver.  
+- User provides balances, [x1, x2, ...] (e.g 100USDC and 100 USDT).
+- Newton solver iterates until it finds unique D(liquidity) that satifies the equation.
+- The protocol issues LP tokens to the user proportional tho how much D increased.
 
 #### Swap  
 Users or traders swaps a token for another.  
@@ -36,6 +39,9 @@ Users or traders swaps a token for another.
 - The tokens are then swapped as necessary.  
 
 #### Withdrawal  
-Liquidity providers burn their LP tokens to redeem their share of the underlying assets.  
-- They specify the amount of LP token to burn an the min bounds of the tokens to recieve.  
-- Execution window is provided.  
+There are two types of withdrawals. A balanced withdrawal where no solver is required, and 
+an imbalanced withdrawal where a solver is required as it performs a virtual swap.  
+- In a balanced withdrawal, if a user wants to withdraw a percentage of their LP tokens, the protocol gives them 10% of every token in the pool.
+- In imbalanced withdrawal, the protocol calculates the invariant after removing user's share value.
+- Protocol uses Newton solver to find how much USCDC must remain in the pool to satify the target D(liquidity).
+- The difference is sent to the user.

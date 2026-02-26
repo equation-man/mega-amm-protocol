@@ -1,19 +1,8 @@
 //! utility functions for performing price discovery math.
 use core::cmp::Ordering;
 
-// Calculating the contant product, sum of x_i.
-pub fn constant_sum(reserves: &[u64]) -> Result<u64, &'static str> {
-    reserves.iter().try_fold(0u64, |acc, &x| {
-        acc.checked_add(x as u64).ok_or("Constant sum overflow")
-    })
-}
-
-// Calculating the constant product, product of x_i.
-pub fn constant_product(reserves: &[u128]) -> Result<u128, &'static str> {
-    reserves.iter().try_fold(1u128, |acc, &x| {
-        acc.checked_mul(x as u128).ok_or("Constant product overflow")
-    })
-}
+type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
+const ONE: usize = 8;
 
 // Converting &[u64] to &[u128] for scaling pattern in arithmetic computation.
 pub fn u64_to_u128_inplace(
@@ -27,23 +16,63 @@ pub fn u64_to_u128_inplace(
     Ok(())
 }
 
+// Deposit function.
+pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -> Result<u64, &'static str> {
+    let amp: Uint = amp_param.into();
+    let mut balances: [Uint; 2] = [0; 2];
+    u64_to_u128_inplace(balances_param, &mut balances)?;
+    let n: Uint = n_param.into();
+
+    let sum_x: Uint = balances.iter().sum();
+    if sum_x == 0 { return Ok(0); }
+
+    let mut d = sum_x;
+    let ann = amp.checked_mul(
+        n.checked_pow(n as u32).ok_or("Power error for Ann")?
+        ).ok_or("Multiplication with Ann error")?;
+
+    for _ in 0..64 {
+        let mut d_p = d;
+        for x in balances {
+            d_p = d_p.checked_mul(d).ok_or("Overflow error for product term")?
+                .checked_div(x.checked_mul(n).ok_or("Overflow error on product term")?)
+                .ok_or("Division error on product term")?;
+        }
+
+        let d_prev = d;
+
+        let num = d.checked_mul(ann.checked_mul(sum_x).ok_or("Overflow error on computing numerator")?
+            .checked_add(d_p.checked_mul(n).ok_or("Overflow error on computing numerator")?)
+            .ok_or("Overflow error on addition in numerator")?)
+            .ok_or("Overflow error on numerator computation")?;
+        let den = d.checked_mul(ann.checked_sub(1).ok_or("Underflow error for denominator")?)
+            .ok_or("Overflow on denominator computation")?
+            .checked_add(d_p.checked_mul(n.checked_add(1).ok_or("Overflow on denominator addition")?)
+                .ok_or("Overflow on denominator multiplication")?)
+            .ok_or("Overflow on addition on the denominator")?;
+
+        d = num.checked_div(den).ok_or("Division error on d")?;
+
+        if d > d_prev && d - d_prev <= 1 { return Ok(d.try_into().map_err(|_| "Error scalling down to u64")?); }
+        if d_prev > d && d_prev - d <= 1 { return Ok(d.try_into().map_err(|_| "Error scalling down to u64")?); }
+    }
+    Ok(d.try_into().map_err(|_| "Error scalling down deposit")?)
+}
+
 // Newton-Raphson(NR) with Bisection fallback
 // Here we are solving for the invariant "D" from formula
 // from a modified newton raphson formula.
 // We use "Scaling" pattern, working with u128 to prevent potential overflow and convert back to 
 // u64 for storage.
-
-type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
-const ONE: usize = 8;
-
 // amp: The amplification parameter A.
 // x_i: This is the sum of all tokens available in the pool after the user 
 // credits the pool, minus the balance of the token the user wants to in exchange(token we are
 // solving for).
 // d: The invariant, it represent the token balance of the token we are solving for.
 // n: The number of tokens, e.g, if we have token x and token y, it'll be 2.
+#[inline(always)]
 pub fn newton_solver_scaled(
-    amp_param: u64, x_i_param: u64, d_param: u64, n_param: u8
+    amp_param: u64, x_i_param: u64, d_param: u64, n_param: u32
 ) -> Result<u64, &'static str> {
     // No tokens available in in the pool yet
     if x_i_param == 0 {
