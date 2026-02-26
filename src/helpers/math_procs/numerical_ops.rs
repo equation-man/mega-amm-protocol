@@ -5,9 +5,7 @@ type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
 const ONE: usize = 8;
 
 // Converting &[u64] to &[u128] for scaling pattern in arithmetic computation.
-pub fn u64_to_u128_inplace(
-    reserve: &[u64], out: &mut [u128; 2]
-) -> Result<(), &'static str> {
+pub fn u64_to_u128_inplace(reserve: &[u64], out: &mut [u128; 2]) -> Result<(), &'static str> {
     if out.len() < reserve.len() { return Err("Small output slice"); }
 
     reserve.iter()
@@ -18,6 +16,7 @@ pub fn u64_to_u128_inplace(
 
 // Deposit function.
 pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -> Result<u64, &'static str> {
+    // Scaling to u128 to accomodate large integer computations.
     let amp: Uint = amp_param.into();
     let mut balances: [Uint; 2] = [0; 2];
     u64_to_u128_inplace(balances_param, &mut balances)?;
@@ -39,8 +38,10 @@ pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -
                 .ok_or("Division error on product term")?;
         }
 
+        // Convergence check
         let d_prev = d;
 
+        // Newton's method for d.
         let num = d.checked_mul(ann.checked_mul(sum_x).ok_or("Overflow error on computing numerator")?
             .checked_add(d_p.checked_mul(n).ok_or("Overflow error on computing numerator")?)
             .ok_or("Overflow error on addition in numerator")?)
@@ -53,10 +54,47 @@ pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -
 
         d = num.checked_div(den).ok_or("Division error on d")?;
 
+        // Checking convergence.
         if d > d_prev && d - d_prev <= 1 { return Ok(d.try_into().map_err(|_| "Error scalling down to u64")?); }
         if d_prev > d && d_prev - d <= 1 { return Ok(d.try_into().map_err(|_| "Error scalling down to u64")?); }
     }
+    // Return new value of the liquidity after deposit. Will be used to calculate LP tokens to mint
     Ok(d.try_into().map_err(|_| "Error scalling down deposit")?)
+}
+
+// Withdrawal function to withdraw one coin.
+// Here, we will use our Newton solver as this is treated as a virtual swap.
+pub fn withdraw_imbalanced(
+    lp_tokens_to_burn: u64, total_lp_supply: u64, current_balances: &[u64],
+    d_current: u64, amp: u64
+) -> Result<u64, &'static str> {
+    if lp_tokens_to_burn == 0 || total_lp_supply == 0 {
+        return Ok(0);
+    }
+    // Calcuating the invariant after withdrawal.
+    let d_reduction = d_current.checked_mul(lp_tokens_to_burn).ok_or("Multiplication overflow")?
+        .checked_div(total_lp_supply).ok_or("Division by zero")?;
+    let d_target = d_current.checked_sub(d_reduction).ok_or("D underflow")?;
+
+    // Preparing the solver inputs
+    let x_other = current_balances[1];
+    let n = current_balances.len() as u32;
+
+    // Finding the new value of the invariant.
+    let y_new = newton_solver_scaled(
+        amp, x_other, 
+        d_target.try_into().map_err(|_| "Scaling down on Newton solver failed")?,
+        n
+    )?;
+
+    // Calculating the amount out.
+    let old_balance = current_balances[0];
+    let amount_out_raw = old_balance.checked_sub(y_new).ok_or("Mathematical error: New balance exceeds old")?;
+
+    // Applying fee.
+    let fee = amount_out_raw.checked_div(100).unwrap_or(0); //0.1% fee
+    let final_payment = amount_out_raw.checked_sub(fee).ok_or("Fee error")?;
+    Ok(final_payment.try_into().map_err(|_| "Error scaling down withraw result")?)
 }
 
 // Newton-Raphson(NR) with Bisection fallback
