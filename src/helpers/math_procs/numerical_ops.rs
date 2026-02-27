@@ -2,7 +2,7 @@
 use core::cmp::Ordering;
 
 type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
-const ONE: usize = 8;
+const MAX_TOKENS: usize = 8;
 
 // Converting &[u64] to &[u128] for scaling pattern in arithmetic computation.
 pub fn u64_to_u128_inplace(reserve: &[u64], out: &mut [u128; 2]) -> Result<(), &'static str> {
@@ -95,6 +95,28 @@ pub fn withdraw_imbalanced(
     let fee = amount_out_raw.checked_div(100).unwrap_or(0); //0.1% fee
     let final_payment = amount_out_raw.checked_sub(fee).ok_or("Fee error")?;
     Ok(final_payment.try_into().map_err(|_| "Error scaling down withraw result")?)
+}
+
+// Withdrawing proportional amount of each token from the pool.
+pub fn withdraw_balanced(reserves: &[u64], lp_to_burn: u64, total_lp_supply: u64) -> Result<[u64; MAX_TOKENS], &'static str> {
+    let n_len = reserves.len();
+    if n_len == 0 || n_len > MAX_TOKENS { return Err("Invalid reserve length"); }
+    if total_lp_supply == 0 { return Err("Zero total supply"); }
+    if lp_to_burn == 0 { return Ok([0u64; MAX_TOKENS]); }
+    if lp_to_burn > total_lp_supply { return Err("Burn amount exceeded supply"); }
+
+    let mut amount_out = [0u64; MAX_TOKENS];
+    for i in 0..n_len {
+        let reserve_i: Uint = reserves[i].into();
+        let burn_amt: Uint = lp_to_burn.into();
+        let supply: Uint = total_lp_supply.into();
+
+        let out = (reserve_i * burn_amt) / supply;
+
+        amount_out[i] = out.try_into().map_err(|_| "Error scaling down balanced withdrawal")?;
+    }
+    // Return array containing amount of each token to be sent to the user
+    Ok(amount_out)
 }
 
 // Newton-Raphson(NR) with Bisection fallback
