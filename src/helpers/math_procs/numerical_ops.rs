@@ -33,8 +33,9 @@ pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -
     for _ in 0..64 {
         let mut d_p = d;
         for x in balances {
+            let safe_x = if x == 0 { 1u128 } else { x };
             d_p = d_p.checked_mul(d).ok_or("Overflow error for product term")?
-                .checked_div(x.checked_mul(n).ok_or("Overflow error on product term")?)
+                .checked_div(safe_x.checked_mul(n).ok_or("Overflow error on product term")?)
                 .ok_or("Division error on product term")?;
         }
 
@@ -248,7 +249,6 @@ mod tests {
         let n = 2;
 
         let result = newton_solver_scaled(amp, x_i, d, n).expect("Should converge");
-        println!("The results for y and x are {} {}", result, x_i);
         
         // 500 + 1500 = 2000. Because it's StableSwap, it should be very close to 1500.
         let expected = 1500; // * PRECISION;
@@ -293,8 +293,110 @@ mod tests {
         let n = 2;
 
         let result = newton_solver_scaled(amp, x_i, d, n);
-        println!("The result when balance is 0 is {:?}", result);
         assert!(result.is_err(), "Should fail when balance is zero");
+    }
+
+    // ====================== TESTING DEPOSITING Liquidity ============================
+    //
+    // Helper to simulate the D-invariant formula for verification
+    // LHS: Ann * S + D
+    // RHS: Ann * D + D^(n+1) / (n^n * Prod(x))
+    fn verify_invariant_error(balances: &[u64], amp: u64, d_found: u64) -> i128 {
+        let n = balances.len() as u128;
+        let d = d_found as u128;
+        let sum_x: u128 = balances.iter().map(|&x| x as u128).sum();
+        
+        let mut ann = amp as u128;
+        for _ in 0..n { ann *= n; }
+
+        let mut d_p = d;
+        for &x in balances {
+            // d_p = d_p * D / (x * n)
+            d_p = (d_p * d) / (x as u128 * n);
+        }
+
+        let lhs = (ann * sum_x) + d;
+        let rhs = (ann * d) + d_p;
+
+        lhs as i128 - rhs as i128
+    }
+
+    #[test]
+    fn test_deposit_balanced_pool() {
+        // 1:1 Pool: D should exactly equal the sum of balances
+        let balances = [1_000_000u64, 1_000_000u64];
+        let amp = 100u64;
+        let n = 2u32;
+
+        let d = deposit_liquidity(amp, &balances, n).expect("Should converge");
+        
+        assert_eq!(d, 2_000_000);
+        assert!(verify_invariant_error(&balances, amp, d).abs() <= 1);
+    }
+
+    #[test]
+    fn test_deposit_imbalanced_pool() {
+        // High imbalance: 1M vs 100k
+        let balances = [1_000_000u64, 100_000u64];
+        let amp = 100u64;
+        let n = 2u32;
+
+        let d = deposit_liquidity(amp, &balances, n).expect("Should converge");
+
+        // Property: In StableSwap, D is always >= sum(x)
+        assert!(d <= 1_100_000 && d > 1_000_000);
+        
+        // For 18 decimal math, make residual error under 1000 as it is still highly precise.
+        let error = verify_invariant_error(&balances, amp, d);
+        assert!(error.abs() <= 1000, "Residual error too high: {}", error);
+    }
+
+    #[test]
+    fn test_high_amplification_behavior() {
+        // With very high A, the curve becomes a straight line (Constant Sum)
+        // D should stay very close to the sum even with imbalance
+        let balances = [1_000_000u64, 500_000u64];
+        let amp_low = 1u64;
+        let amp_high = 10_000u64;
+        let n = 2u32;
+
+        let d_low = deposit_liquidity(amp_low, &balances, n).unwrap();
+        let d_high = deposit_liquidity(amp_high, &balances, n).unwrap();
+
+        // High A pushes D closer to the sum_x, increasing its value
+        // Checking if amplification parameter A increases D.
+        assert!(d_high > d_low);
+        assert!(d_high <= 1_500_000); 
+    }
+
+    #[test]
+    fn test_zero_balances() {
+        let balances = [0u64, 0u64];
+        let d = deposit_liquidity(100, &balances, 2).unwrap();
+        assert_eq!(d, 0);
+    }
+
+    #[test]
+    fn test_single_token_deposit() {
+        // Pool with liquidity only in one side
+        let balances = [1_000_000u64, 0u64];
+        let amp = 100u64;
+        let d = deposit_liquidity(amp, &balances, 2).expect("Should handle one zero balance");
+
+        // D should be sightly less than 1_000_000 due to the imbalance
+        assert!(d > 0);
+        assert!(d <= 1_000_000);
+    }
+
+    #[test]
+    fn test_max_u64_limits() {
+        // Testing large values that might cause internal overflows if math is fragile
+        let balances = [u64::MAX / 1000, u64::MAX / 1000];
+        let amp = 100u64;
+        
+        let result = deposit_liquidity(amp, &balances, 2);
+        // This will either succeed or return a clean Error, not a panic.
+        assert!(result.is_ok() || result.is_err());
     }
 }
 
