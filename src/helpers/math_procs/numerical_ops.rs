@@ -398,5 +398,85 @@ mod tests {
         // This will either succeed or return a clean Error, not a panic.
         assert!(result.is_ok() || result.is_err());
     }
+
+    // =============== TESTING WITHDRAWALS ==============
+    //
+    //
+    #[test]
+    fn test_withdraw_half_supply() {
+        // Setup: Balanced pool [1M, 1M] -> D = 2M
+        let current_balances = [1_000_000u64, 1_000_000u64];
+        let total_lp_supply = 2_000_000u64;
+        let d_current = 2_000_000u64;
+        let amp = 100u64;
+        
+        // User burns half the supply (1M LP tokens)
+        let lp_to_burn = 1_000_000u64;
+
+        let amount_out = withdraw_imbalanced(
+            lp_to_burn, 
+            total_lp_supply, 
+            &current_balances, 
+            d_current, 
+            amp
+        ).expect("Withdrawal should converge");
+        println!("Withdrawing half supply amount is {}", amount_out);
+
+        // Expected: 50% of 1,000,000 = 500,000
+        // Minus 0.1% fee: 500,000 - 500 = 499,500
+        assert!(amount_out > 900_000, "Reflec hight convexity exit");
+        assert!(amount_out < 1_000_000, "Cannot exceed current balance"); 
+    }
+
+    #[test]
+    fn test_withdraw_from_imbalanced_pool() {
+        // Setup: Imbalanced pool [1M, 500k]
+        // From previous tests, we know D will be < 1.5M (approx 1,470,000 for low A)
+        let current_balances = [1_000_000u64, 500_000u64];
+        let total_lp_supply = 1_470_000u64;
+        let d_current = 1_470_000u64;
+        let amp = 10u64;
+
+        let lp_to_burn = 147_000u64; // Burning 10% of supply
+
+        let amount_out = withdraw_imbalanced(
+            lp_to_burn, 
+            total_lp_supply, 
+            &current_balances, 
+            d_current, 
+            amp
+        ).expect("Should handle imbalanced exit");
+
+        // Withdrawing oversupplied tokens results in rebalancing bonus
+        // The user should get roughly 10% of the first token's balance
+        assert!(amount_out > 0);
+        assert!(amount_out > 100_000, "Should receive rebalancing bonus"); // 10% of 1M is 100k; minus fees and slippage
+        assert!(amount_out < 200_000, "Should not exceed reasonable bound");
+    }
+
+    #[test]
+    fn test_withdraw_too_much_fails() {
+        let current_balances = [1_000_000u64, 1_000_000u64];
+        let total_lp_supply = 2_000_000u64;
+        
+        // Attempt to burn more than exists
+        let result = withdraw_imbalanced(
+            2_000_001, 
+            total_lp_supply, 
+            &current_balances, 
+            2_000_000, 
+            100
+        );
+        
+        assert_eq!(result, Err("D underflow"));
+    }
+
+    #[test]
+    fn test_zero_burn_returns_zero() {
+        let current_balances = [1_000_000u64, 1_000_000u64];
+        let amount = withdraw_imbalanced(0, 2_000_000, &current_balances, 2_000_000, 100).unwrap();
+        assert_eq!(amount, 0);
+    }
+
 }
 
