@@ -2,7 +2,7 @@
 use core::cmp::Ordering;
 
 type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
-const MAX_TOKENS: usize = 8;
+const MAX_TOKENS: usize = 2;
 
 // Converting &[u64] to &[u128] for scaling pattern in arithmetic computation.
 pub fn u64_to_u128_inplace(reserve: &[u64], out: &mut [u128; 2]) -> Result<(), &'static str> {
@@ -33,8 +33,7 @@ pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -
     for _ in 0..64 {
         let mut d_p = d;
         for x in balances {
-            let safe_x = if x == 0 { 1u128 } else { x };
-            d_p = d_p.checked_mul(d).ok_or("Overflow error for product term")?
+            let safe_x = if x == 0 { 1u128 } else { x }; d_p = d_p.checked_mul(d).ok_or("Overflow error for product term")?
                 .checked_div(safe_x.checked_mul(n).ok_or("Overflow error on product term")?)
                 .ok_or("Division error on product term")?;
         }
