@@ -420,10 +420,9 @@ mod tests {
             d_current, 
             amp
         ).expect("Withdrawal should converge");
-        println!("Withdrawing half supply amount is {}", amount_out);
 
-        // Expected: 50% of 1,000,000 = 500,000
-        // Minus 0.1% fee: 500,000 - 500 = 499,500
+        // Withdrawing 50% D from one side requires almost taking entire balance  
+        // from that side
         assert!(amount_out > 900_000, "Reflec hight convexity exit");
         assert!(amount_out < 1_000_000, "Cannot exceed current balance"); 
     }
@@ -478,5 +477,57 @@ mod tests {
         assert_eq!(amount, 0);
     }
 
+    // ======================== TESTING WITHDRAWAL FROM A BALANCED POOL ==========================
+    #[test]
+    fn test_balanced_withdrawal_half_supply() {
+        // Setup: Balanced pool [1,000,000, 1,000,000]
+        let reserves = [1_000_000u64, 1_000_000u64];
+        let total_lp_supply = 2_000_000u64;
+        let lp_to_burn = 1_000_000u64; // Burning exactly 50%
+
+        let amounts_out = withdraw_balanced(&reserves, lp_to_burn, total_lp_supply)
+            .expect("Should calculate proportional withdrawal");
+
+        // In a balanced withdrawal, 50% LP burn = 50% of EACH asset.
+        // Result should be [500,000, 500,000]
+        assert_eq!(amounts_out[0], 500_000);
+        assert_eq!(amounts_out[1], 500_000);
+    }
+
+    #[test]
+    fn test_balanced_withdrawal_imbalanced_pool() {
+        // Setup: Imbalanced pool [1,000,000, 500,000]
+        let reserves = [1_000_000u64, 500_000u64];
+        let total_lp_supply = 1_500_000u64; 
+        let lp_to_burn = 150_000u64; // Burning exactly 10%
+
+        let amounts_out = withdraw_balanced(&reserves, lp_to_burn, total_lp_supply)
+            .expect("Should handle imbalanced pool proportional exit");
+
+        // Result: 10% of 1M = 100k, 10% of 500k = 50k
+        assert_eq!(amounts_out[0], 100_000);
+        assert_eq!(amounts_out[1], 50_000);
+    }
+
+    #[test]
+    fn test_balanced_withdrawal_rounding() {
+        // Setup: Testing precision with odd numbers
+        let reserves = [100u64, 100u64];
+        let total_lp_supply = 300u64;
+        let lp_to_burn = 100u64; // 1/3rd of the supply
+
+        let amounts_out = withdraw_balanced(&reserves, lp_to_burn, total_lp_supply).unwrap();
+
+        // (100 * 100) / 300 = 33.33 -> rounds down to 33
+        assert_eq!(amounts_out[0], 33);
+        assert_eq!(amounts_out[1], 33);
+    }
+
+    #[test]
+    fn test_balanced_withdrawal_burn_exceeds_supply() {
+        let reserves = [1_000_000u64, 1_000_000u64];
+        let result = withdraw_balanced(&reserves, 11, 10);
+        assert_eq!(result, Err("Burn amount exceeded supply"));
+    }
 }
 
