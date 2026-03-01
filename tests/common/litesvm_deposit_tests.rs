@@ -56,20 +56,8 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext) -> DepositTestContext {
 
     // Build deposit instruction.
     let deposit_ix_data = build_deposit_ix_data(
-        1_000_000_000, 1_000_000_000, 1_000_000_000, i64::MAX,
+        1_000_000u64, 1_000_000u64, i64::MAX,
     );
-
-    let mut instruction_data = vec![1u8];
-    //Amount
-    instruction_data.extend_from_slice(
-        &2_000_000_000_000_000_000u128.to_le_bytes()
-    );
-    // Max x. Slippage protection for token x.
-    instruction_data.extend_from_slice(&1_000_000_000u64.to_le_bytes());
-    // Max y. Slippage protection for token y.
-    instruction_data.extend_from_slice(&2_000_000_000u64.to_le_bytes());
-    // Expiration time.
-    instruction_data.extend_from_slice(&1_700_000_000i64.to_le_bytes());
 
     let accounts = vec![
         AccountMeta::new(user.pubkey(), true),
@@ -96,7 +84,7 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext) -> DepositTestContext {
     );
 
     let res = ctx.svm.send_transaction(tx);
-    //println!("The deposit result is {:#?}", res);
+    println!("The deposit result is {:#?}", res);
     
     let liquidity_pool = get_token_balance(&ctx.svm, &user_lp_ata);
     println!("The liquidity pool token balance is {}", liquidity_pool);

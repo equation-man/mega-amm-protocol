@@ -78,15 +78,10 @@ impl<'info> TryFrom<&'info [AccountView]> for DepositAccounts<'info> {
 }
 
 pub struct DepositInstructionData {
-    // Amount of LP token that the user receives or mint.
-    // E.G user wants 100 lp tokens, AMM computes required token x and token y
-    pub amount: u64,
-    // Max amount of token x deposited by the user. Required x is <= to this amount.
-    // This is slippage protection for token X.
-    pub max_x: u64,
-    // Max amount of token y deposited by the user. Required y is <= to this amount.
-    // This is slippage protection for token y.
-    pub max_y: u64,
+    // Amount of token x that the user intends to deposit into the pool.
+    pub amount_x: u64,
+    // Amount of token y that the user intends to deposit into the pool.
+    pub amount_y: u64,
     // Expiration of this order, Makes sure that the transaction has to 
     // be done within a certain amount of time.
     pub expiration: i64,
@@ -99,21 +94,16 @@ impl<'a> TryFrom<&'a [u8]> for DepositInstructionData {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
-        let amount = u64::from_le_bytes(data[0..8].try_into().unwrap());
-        let max_x = u64::from_le_bytes(data[8..16].try_into().unwrap());
-        let max_y = u64::from_le_bytes(data[16..24].try_into().unwrap());
-        let expiration = i64::from_le_bytes(data[24..32].try_into().unwrap());
+        let amount_x = u64::from_le_bytes(data[0..8].try_into().unwrap());
+        let amount_y = u64::from_le_bytes(data[8..16].try_into().unwrap());
+        let expiration = i64::from_le_bytes(data[16..24].try_into().unwrap());
 
-        if amount == 0 {
-            return Err(MegaAmmProgramError::InvalidInstructionData.into());
-        }
-
-        if max_x == 0 || max_y == 0 {
+        if amount_x == 0 || amount_y == 0 {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
         Ok(Self {
-            amount, max_x, max_y, expiration,
+            amount_x, amount_y, expiration
         })
     }
 }
@@ -166,26 +156,16 @@ impl<'info> Deposit<'info> {
             (vault_x.amount(), vault_y.amount(), mint_lp.supply())
         };
 
-        // Grab the ammounts to deposit. Constant product should be calculated from the amounts
-        // set in the config.
-        let (x, y) = match lp_supply == 0 && vault_x_amount == 0 && vault_y_amount == 0 {
-            true => (self.instruction_data.max_x, self.instruction_data.max_y),
-            false => {
-                let amounts = ConstantProduct::xy_deposit_amounts_from_l(
-                    vault_x_amount,
-                    vault_y_amount,
-                    lp_supply,
-                    self.instruction_data.amount, // lp tokens user wants to receive.
-                    6,
-                ).map_err(|_| ProgramError::InvalidArgument)?;
-                (amounts.x, amounts.y)
-            }
-        };
-
-        // Slippage protection
-        if !(x <= self.instruction_data.max_y && y <= self.instruction_data.max_y) {
-            return Err(MegaAmmProgramError::InvalidInstructionData.into());
-        }
+        // Using newton to calculate the amount of LP tokens to be minted.
+        // We provide the amounts of token x and y that we want to deposit 
+        // in the liquidity pool.
+        let balances = [vault_x_amount, vault_y_amount];
+        let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0 };
+        log!("About to run newton solver");
+        let mint_lp_from_newton = curve.deposit_to_amm(
+            100u64, lp_supply, balances.len() as u32, &balances
+            ).map_err(|e| { log!("The error is {}", e); ProgramError::Custom(0)})?;
+        log!("Lp to mint via newton is: >>>>>> {}", mint_lp_from_newton);
 
         // Transfer tokens(x & y) from ata to vaults/token accounts of the pool.
         // Amount to transfer is calculated from the lp token to be minted.
@@ -193,14 +173,14 @@ impl<'info> Deposit<'info> {
             self.accounts.user_x_ata,
             self.accounts.vault_x,
             self.accounts.user, // Wallet signer
-            x,
+            self.instruction_data.amount_x, // x tokens amount to transfer
             None, // user signs normally.
         )?;
         TokenAccount::transfer_spl_tokens(
             self.accounts.user_y_ata,
             self.accounts.vault_y,
             self.accounts.user, // Wallet signer
-            y,
+            self.instruction_data.amount_y, // y token amounts to transfer
             None, // user signs normally.
         )?;
 
@@ -223,7 +203,7 @@ impl<'info> Deposit<'info> {
             self.accounts.mint_lp,
             self.accounts.user_lp_ata,
             self.accounts.mint_lp,
-            self.instruction_data.amount,
+            mint_lp_from_newton,
             &mint_signer,
         )?;
         Ok(())

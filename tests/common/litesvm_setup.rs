@@ -150,14 +150,13 @@ pub fn create_ata(
 }
 
 pub fn build_deposit_ix_data(
-    amount: u64, max_x: u64, max_y: u64, expiration: i64,
+    amount_x: u64, amount_y: u64, expiration: i64,
 ) -> Vec<u8> {
     let mut data = Vec::with_capacity(1+8*3+8);
 
     data.push(1u8); // deposit instruction discriminator. Must match the onchain one.
-    data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&max_x.to_le_bytes());
-    data.extend_from_slice(&max_y.to_le_bytes());
+    data.extend_from_slice(&amount_x.to_le_bytes());
+    data.extend_from_slice(&amount_y.to_le_bytes());
     data.extend_from_slice(&expiration.to_le_bytes());
 
     data
