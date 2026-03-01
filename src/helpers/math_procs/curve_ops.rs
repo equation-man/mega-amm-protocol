@@ -76,6 +76,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_initial_deposit_to_amm_proportional_minting() {
+        // Setup: Balanced pool [1M, 1M] -> D_old = 2M
+        let initial_reserves = [0u64, 0u64];
+        let curve = MegaAmmStableSwapCurve {
+            balances: &initial_reserves,
+            fee: 0, 
+        };
+
+        let total_supply = 0u64; // Existing LP tokens (1:1 with D)
+        
+        // User adds 100k of each token (proportional deposit)
+        // New balances: [1.1M, 1.1M] -> D_new = 2.2M
+        let new_balances = [1_100_000u64, 1_100_000u64];
+        let amp = 100u64;
+        let n = 2u32;
+
+        let initial_lp_minted = curve.deposit_to_amm(amp, total_supply, n, &new_balances)
+            .expect("Should calculate LP minting for initial deposit");
+        println!("The lp minted for initial deposit is: {}", initial_lp_minted);
+
+        // Logic: (2M * 200k) / 2M = 200k
+        assert_eq!(initial_lp_minted, 2200_000);
+    }
+
+    #[test]
     fn test_deposit_to_amm_proportional_minting() {
         // Setup: Balanced pool [1M, 1M] -> D_old = 2M
         let initial_reserves = [1_000_000u64, 1_000_000u64];

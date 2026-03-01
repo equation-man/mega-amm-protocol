@@ -163,9 +163,9 @@ impl<'info> Deposit<'info> {
         let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0 };
         log!("About to run newton solver");
         let mint_lp_from_newton = curve.deposit_to_amm(
-            100u64, lp_supply, balances.len() as u32, &balances
-            ).map_err(|e| { log!("The error is {}", e); ProgramError::Custom(0)})?;
-        log!("Lp to mint via newton is: >>>>>> {}", mint_lp_from_newton);
+            100u64, lp_supply, balances.len() as u32,
+            &[self.instruction_data.amount_x, self.instruction_data.amount_y]
+        ).map_err(|e| { log!("The error is {}", e); ProgramError::Custom(0)})?;
 
         // Transfer tokens(x & y) from ata to vaults/token accounts of the pool.
         // Amount to transfer is calculated from the lp token to be minted.
