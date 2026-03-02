@@ -4,6 +4,31 @@ use core::cmp::Ordering;
 type Uint = u128; // Used to represent fixed point numbers (1e18 decimals).
 const MAX_TOKENS: usize = 2;
 
+// Fee calculator function.
+pub fn apply_swap_fee(
+    amount_out_raw: u64,
+    fee_bps: u64, // e.g., 30 for 0.3%
+) -> Result<u64, &'static str> {
+    if fee_bps == 0 {
+        return Ok(amount_out_raw);
+    }
+
+    // Calculating fee using u128 to prevent overflow
+    // Formula: (Amount * FeeBps) / 10,000. 10,000 Bps equals 100%
+    let fee = (amount_out_raw as u128)
+        .checked_mul(fee_bps as u128)
+        .ok_or("Fee multiplication overflow")?
+        .checked_div(10_000)
+        .ok_or("Fee division error")?;
+
+    // Subtract fee from the raw amount
+    let final_amount = (amount_out_raw as u128)
+        .checked_sub(fee)
+        .ok_or("Fee underflow")?;
+
+    Ok(final_amount as u64)
+}
+
 // Converting &[u64] to &[u128] for scaling pattern in arithmetic computation.
 pub fn u64_to_u128_inplace(reserve: &[u64], out: &mut [u128; 2]) -> Result<(), &'static str> {
     if out.len() < reserve.len() { return Err("Small output slice"); }
@@ -91,7 +116,7 @@ pub fn withdraw_imbalanced(
     let old_balance = current_balances[0];
     let amount_out_raw = old_balance.checked_sub(y_new).ok_or("Mathematical error: New balance exceeds old")?;
 
-    // Applying fee.
+    // Applying fee. Fee is applied where this function is called.
     let fee = amount_out_raw.checked_div(100).unwrap_or(0); //0.1% fee
     let final_payment = amount_out_raw.checked_sub(fee).ok_or("Fee error")?;
     Ok(final_payment.try_into().map_err(|_| "Error scaling down withraw result")?)

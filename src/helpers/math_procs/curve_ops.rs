@@ -31,7 +31,8 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
     // Withdrawing from amm, from balanced or unbalanced pools
     pub fn withdraw_from_amm(
         &self, lp_to_burn: u64, total_lp_supply: u64,
-        balanced_state: u8, d_current: Option<u64>, amp: Option<u64>
+        balanced_state: u8, d_current: Option<u64>,
+        amp: Option<u64>, fee: Option<u64>
     ) -> Result<[u64; 2], &'static str> {
         // Returns the final payout amount to be transferred.
         match balanced_state {
@@ -42,11 +43,14 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
                 Ok(amount_out)
             },
             1 => {
+                // Withdrawing imbalance attracts fees since it is a virtual swap
                 let amount_out = withdraw_imbalanced(
                     lp_to_burn, total_lp_supply, self.balances,
                     d_current.unwrap(), amp.unwrap()
                 ).expect("Balanced withdrawal error");
-                Ok([amount_out, 0 as u64])
+                let final_amount = apply_swap_fee(amount_out, fee.unwrap())?;
+
+                Ok([final_amount, 0 as u64])
             },
             _ => Err("Withdraw mode error")
         }
