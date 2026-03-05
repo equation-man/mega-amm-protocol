@@ -11,6 +11,8 @@ use crate::helpers::utils::{
     TokenAccount, ProgramAccount, AssociatedTokenAccount,
 };
 use constant_product_curve::ConstantProduct;
+use crate::helpers::math_procs::curve_ops::MegaAmmStableSwapCurve;
+use crate::helpers::math_procs::numerical_ops::get_d;
 use crate::config::{Config, AmmState};
 use pinocchio_log::log;
 
@@ -53,35 +55,38 @@ impl<'info> TryFrom<&'info [AccountView]> for WithdrawAccounts<'info> {
     }
 }
 
+#[repr(C)]
 pub struct WithdrawInstructionData {
-    pub amount: u64,
-    pub min_x: u64,
-    pub min_y: u64,
+    pub lp_to_burn: u64,
+    pub amount_of_x: u64,
+    pub amount_of_y: u64,
     pub expiration: i64,
+    pub withdraw_mode: u8,
 }
 
 impl<'info> TryFrom<&'info [u8]> for WithdrawInstructionData {
     type Error = MegaAmmProgramError;
     fn try_from(data: &'info [u8]) -> Result<Self, Self::Error> {
-        if data.len() != size_of::<WithdrawInstructionData>() {
+        if data.len() != (8+8+8+8+1) {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
-        let amount = u64::from_le_bytes(data[0..8].try_into().unwrap());
-        let min_x = u64::from_le_bytes(data[8..16].try_into().unwrap());
-        let min_y = u64::from_le_bytes(data[16..24].try_into().unwrap());
+        let lp_to_burn = u64::from_le_bytes(data[0..8].try_into().unwrap());
+        let amount_of_x = u64::from_le_bytes(data[8..16].try_into().unwrap());
+        let amount_of_y = u64::from_le_bytes(data[16..24].try_into().unwrap());
         let expiration = i64::from_le_bytes(data[24..32].try_into().unwrap());
+        let withdraw_mode = data[32];
 
-        if amount <= 0 {
+        if lp_to_burn < 0 {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
-        if min_x <=0 || min_y <=0 {
+        if amount_of_x < 0 || amount_of_y < 0 {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
         Ok(Self {
-            amount, min_x, min_y, expiration,
+            withdraw_mode, lp_to_burn, amount_of_x, amount_of_y, expiration
         })
     }
 }
@@ -128,23 +133,51 @@ impl<'info> Withdraw<'info> {
             (vault_x.amount(), vault_y.amount(), mint_lp.supply())
         };
 
-        let (x, y) = match lp_supply == self.instruction_data.amount {
-            true => (vault_x_amount, vault_y_amount),
-            false => {
-                let amounts = ConstantProduct::xy_withdraw_amounts_from_l(
-                    vault_x_amount,
-                    vault_y_amount,
-                    lp_supply,
-                    self.instruction_data.amount,
-                    6,
-                ).map_err(|_| ProgramError::InvalidArgument)?;
-                (amounts.x, amounts.y)
-            }
+        log!("Enter the newton solvers");
+        let balances = [vault_x_amount, vault_y_amount];
+        let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0};
+        // Calculating d_current and the lps to burn.
+        log!("Getting the d current");
+        let d_current = get_d(100, curve.balances, 2).map_err(|_| ProgramError::Custom(0))?;
+        // Transfer token amounts returned.
+        log!("Getting the withdraw amounts");
+        let amounts = match self.instruction_data.withdraw_mode {
+            0 => {
+                log!("Balanced withdrawal");
+                let new_balances = curve.withdraw_from_amm(self.instruction_data.lp_to_burn, lp_supply, 0, None, None, None)
+                    .map_err(|_| ProgramError::Custom(2))?;
+                log!("Balanced withdrawal");
+                new_balances
+            },
+            1 => {
+                let d_new = get_d(100, &[self.instruction_data.amount_of_x, self.instruction_data.amount_of_y], 2).map_err(|_| ProgramError::Custom(1))?;
+                let spread = d_current.checked_sub(d_new).ok_or(ProgramError::Custom(2))?;
+                let lp_to_burn = lp_supply.checked_mul(spread).ok_or(ProgramError::Custom(3))?.checked_div(d_new).ok_or(ProgramError::Custom(4))?;
+                let new_balances = curve.withdraw_from_amm(lp_to_burn, lp_supply, 1, Some(d_current), Some(100), Some(amm_config.fee().into()))
+                    .map_err(|_| ProgramError::Custom(2))?;
+                new_balances
+            },
+            _ => [0, 0]
         };
-        // Check for Slippage.
-        if !(x >= self.instruction_data.min_x && y >= self.instruction_data.min_y) {
-            return Err(ProgramError::InvalidArgument);
-        }
+        log!("The withdraw amounts are {}", amounts[0]);
+
+        //let (x, y) = match lp_supply == self.instruction_data.amount {
+        //    true => (vault_x_amount, vault_y_amount),
+        //    false => {
+        //        let amounts = ConstantProduct::xy_withdraw_amounts_from_l(
+        //            vault_x_amount,
+        //            vault_y_amount,
+        //            lp_supply,
+        //            self.instruction_data.amount,
+        //            6,
+        //        ).map_err(|_| ProgramError::InvalidArgument)?;
+        //        (amounts.x, amounts.y)
+        //    }
+        //};
+        //// Check for Slippage.
+        //if !(x >= self.instruction_data.min_x && y >= self.instruction_data.min_y) {
+        //    return Err(ProgramError::InvalidArgument);
+        //}
 
         let seed_binding = amm_config.seed().to_le_bytes();
         let conf_bump_binding = amm_config.config_bump();
@@ -158,39 +191,39 @@ impl<'info> Withdraw<'info> {
         let signer_seeds = [Signer::from(&config_signer_seeds)];
 
         // Transfer tokens x and y from the vault of the pool to the user.
-        TokenAccount::transfer_spl_tokens(
-            self.accounts.vault_x,
-            self.accounts.user_x_ata,
-            self.accounts.config,
-            x,
-            Some(&signer_seeds),
-        )?;
-        TokenAccount::transfer_spl_tokens(
-            self.accounts.vault_y,
-            self.accounts.user_y_ata,
-            self.accounts.config,
-            y,
-            Some(&signer_seeds),
-        )?;
+        //TokenAccount::transfer_spl_tokens(
+        //    self.accounts.vault_x,
+        //    self.accounts.user_x_ata,
+        //    self.accounts.config,
+        //    x,
+        //    Some(&signer_seeds),
+        //)?;
+        //TokenAccount::transfer_spl_tokens(
+        //    self.accounts.vault_y,
+        //    self.accounts.user_y_ata,
+        //    self.accounts.config,
+        //    y,
+        //    Some(&signer_seeds),
+        //)?;
 
         // Prevent burning of 0 LP tokens
-        if self.instruction_data.amount == 0 {
-            return Err(ProgramError::InvalidArgument);
-        }
+        //if self.instruction_data.amount == 0 {
+        //    return Err(ProgramError::InvalidArgument);
+        //}
 
-        // Prevent impossible burns.
-        if self.instruction_data.amount > lp_supply {
-            return Err(ProgramError::InvalidArgument);
-        }
+        //// Prevent impossible burns.
+        //if self.instruction_data.amount > lp_supply {
+        //    return Err(ProgramError::InvalidArgument);
+        //}
 
         // Burning the required tokens, for pool share ownership.
-        TokenAccount::burn_tokens(
-            self.accounts.mint_lp,
-            self.accounts.user_lp_ata,
-            self.accounts.user,
-            self.instruction_data.amount,
-            None
-        )?;
+        //TokenAccount::burn_tokens(
+        //    self.accounts.mint_lp,
+        //    self.accounts.user_lp_ata,
+        //    self.accounts.user,
+        //    self.instruction_data.amount,
+        //    None
+        //)?;
 
         Ok(())
     }

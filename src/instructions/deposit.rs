@@ -161,7 +161,6 @@ impl<'info> Deposit<'info> {
         // in the liquidity pool.
         let balances = [vault_x_amount, vault_y_amount];
         let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0 };
-        log!("About to run newton solver");
         let mint_lp_from_newton = curve.deposit_to_amm(
             100u64, lp_supply, balances.len() as u32,
             &[self.instruction_data.amount_x, self.instruction_data.amount_y]

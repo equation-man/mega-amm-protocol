@@ -39,8 +39,8 @@ pub fn u64_to_u128_inplace(reserve: &[u64], out: &mut [u128; 2]) -> Result<(), &
     Ok(())
 }
 
-// Deposit function.
-pub fn deposit_liquidity(amp_param: u64, balances_param: &[u64], n_param: u32) -> Result<u64, &'static str> {
+// Calculating the invariant D
+pub fn get_d(amp_param: u64, balances_param: &[u64], n_param: u32) -> Result<u64, &'static str> {
     // Scaling to u128 to accomodate large integer computations.
     let amp: Uint = amp_param.into();
     let mut balances: [Uint; 2] = [0; 2];
@@ -352,7 +352,7 @@ mod tests {
         let amp = 100u64;
         let n = 2u32;
 
-        let d = deposit_liquidity(amp, &balances, n).expect("Should converge");
+        let d = get_d(amp, &balances, n).expect("Should converge");
         
         assert_eq!(d, 2_000_000);
         assert!(verify_invariant_error(&balances, amp, d).abs() <= 1);
@@ -365,7 +365,7 @@ mod tests {
         let amp = 100u64;
         let n = 2u32;
 
-        let d = deposit_liquidity(amp, &balances, n).expect("Should converge");
+        let d = get_d(amp, &balances, n).expect("Should converge");
 
         // Property: In StableSwap, D is always >= sum(x)
         assert!(d <= 1_100_000 && d > 1_000_000);
@@ -384,8 +384,8 @@ mod tests {
         let amp_high = 10_000u64;
         let n = 2u32;
 
-        let d_low = deposit_liquidity(amp_low, &balances, n).unwrap();
-        let d_high = deposit_liquidity(amp_high, &balances, n).unwrap();
+        let d_low = get_d(amp_low, &balances, n).unwrap();
+        let d_high = get_d(amp_high, &balances, n).unwrap();
 
         // High A pushes D closer to the sum_x, increasing its value
         // Checking if amplification parameter A increases D.
@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn test_zero_balances() {
         let balances = [0u64, 0u64];
-        let d = deposit_liquidity(100, &balances, 2).unwrap();
+        let d = get_d(100, &balances, 2).unwrap();
         assert_eq!(d, 0);
     }
 
@@ -405,7 +405,7 @@ mod tests {
         // Pool with liquidity only in one side
         let balances = [1_000_000u64, 0u64];
         let amp = 100u64;
-        let d = deposit_liquidity(amp, &balances, 2).expect("Should handle one zero balance");
+        let d = get_d(amp, &balances, 2).expect("Should handle one zero balance");
 
         // D should be sightly less than 1_000_000 due to the imbalance
         assert!(d > 0);
@@ -418,7 +418,7 @@ mod tests {
         let balances = [u64::MAX / 1000, u64::MAX / 1000];
         let amp = 100u64;
         
-        let result = deposit_liquidity(amp, &balances, 2);
+        let result = get_d(amp, &balances, 2);
         // This will either succeed or return a clean Error, not a panic.
         assert!(result.is_ok() || result.is_err());
     }
