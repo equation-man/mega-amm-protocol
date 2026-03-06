@@ -141,6 +141,7 @@ pub fn withdraw_balanced(reserves: &[u64], lp_to_burn: u64, total_lp_supply: u64
         amount_out[i] = out.try_into().map_err(|_| "Error scaling down balanced withdrawal")?;
     }
     // Return array containing amount of each token to be sent to the user
+    // returns them with the arrangement that they were supplied
     Ok(amount_out)
 }
 

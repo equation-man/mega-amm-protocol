@@ -37,7 +37,7 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
         balanced_state: u8, d_current: Option<u64>,
         amp: Option<u64>, fee: Option<u64>
     ) -> Result<[u64; 2], &'static str> {
-        // Returns the final payout amount to be transferred.
+        // Returns the final payout or token amounts to be transferred.
         match balanced_state {
             0 => {
                 // Lp to burn is sent by the user from the front end and proportional amount of
@@ -50,12 +50,14 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
             1 => {
                 // Withdrawing imbalance attracts fees since it is a virtual swap
                 // lp token to burn is computed in the withdraw instruction for this.
+                // Withdraw one coin. Submit amount to withdraw.
                 let amount_out = withdraw_imbalanced(
                     lp_to_burn, total_lp_supply, self.balances,
                     d_current.unwrap(), amp.unwrap()
                 ).map_err(|_| "Balanced withdrawal error")?;
                 let final_amount = apply_swap_fee(amount_out, fee.unwrap())?;
 
+                // We are only withdrawing one token and it is the first.
                 Ok([final_amount, 0 as u64])
             },
             _ => Err("Withdraw mode error")
@@ -239,7 +241,7 @@ mod tests {
             Some(30)
         ).expect("Imbalanced dispatch failed");
 
-        // Token 0 should have the payout, Token 1 should be 0 (as per your implementation)
+        // Token 0 should have the payout, Token 1 should be 0 
         assert!(result[0] > 100_000);
         assert_eq!(result[1], 0);
     }

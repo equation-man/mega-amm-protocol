@@ -29,10 +29,10 @@ pub fn withdraw_liquidity(ctx: &mut AmmTestContext, deposit: &DepositTestContext
 
     let mut withdraw_ix_data = vec![2u8];
     withdraw_ix_data.extend_from_slice(&20_000u64.to_le_bytes()); // lp_to_burn u64
-    withdraw_ix_data.extend_from_slice(&1_000_000u64.to_le_bytes()); // amount_of_x u64
+    withdraw_ix_data.extend_from_slice(&100_000u64.to_le_bytes()); // amount_of_x u64
     withdraw_ix_data.extend_from_slice(&1_000_000u64.to_le_bytes()); // amount_of_y u64
     withdraw_ix_data.extend_from_slice(&1_700_000_000i64.to_le_bytes()); // expiration.
-    withdraw_ix_data.push(0u8);
+    withdraw_ix_data.push(1u8);
 
     let withdraw_accounts = vec![
         AccountMeta::new(deposit.user.pubkey(), true),
