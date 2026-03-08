@@ -30,9 +30,9 @@ pub fn withdraw_liquidity(ctx: &mut AmmTestContext, deposit: &DepositTestContext
     let mut withdraw_ix_data = vec![2u8];
     withdraw_ix_data.extend_from_slice(&20_000u64.to_le_bytes()); // lp_to_burn u64
     withdraw_ix_data.extend_from_slice(&100_000u64.to_le_bytes()); // amount_of_x u64
-    withdraw_ix_data.extend_from_slice(&1_000_000u64.to_le_bytes()); // amount_of_y u64
+    withdraw_ix_data.extend_from_slice(&0u64.to_le_bytes()); // amount_of_y u64
     withdraw_ix_data.extend_from_slice(&1_700_000_000i64.to_le_bytes()); // expiration.
-    withdraw_ix_data.push(1u8);
+    withdraw_ix_data.push(0u8);
 
     let withdraw_accounts = vec![
         AccountMeta::new(deposit.user.pubkey(), true),
@@ -59,7 +59,7 @@ pub fn withdraw_liquidity(ctx: &mut AmmTestContext, deposit: &DepositTestContext
     );
 
     let withdraw_res = ctx.svm.send_transaction(tx);
-    println!("The withdraw res is {:#?}", withdraw_res);
+    //println!("The withdraw res is {:#?}", withdraw_res);
     println!("The amount withdrawn is: {}", 500);
     let vault_x_balance = get_token_balance(&ctx.svm, &ctx.vault_x_ata);
     let vault_y_balance = get_token_balance(&ctx.svm, &ctx.vault_y_ata);

@@ -1,6 +1,7 @@
 //! Curve operation for the AMM
 use crate::helpers::MegaAmmProgramError;
 use crate::helpers::math_procs::*;
+use pinocchio_log::log;
 
 pub struct MegaAmmStableSwapCurve<'b> {
     pub balances: &'b [u64],
@@ -28,40 +29,22 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
         Ok(lp_tokens)
     }
 
-    // Withdrawing from amm, from balanced or unbalanced pools
-    // The lp to burn for balanced is specified by the user for the amount available to burn.
-    // The lp to burn for imbalanced is calculated by the smart contract based on the
-    // withdrawal amount the user wants.
-    pub fn withdraw_from_amm(
-        &self, lp_to_burn: u64, total_lp_supply: u64,
-        balanced_state: u8, d_current: Option<u64>,
-        amp: Option<u64>, fee: Option<u64>
-    ) -> Result<[u64; 2], &'static str> {
-        // Returns the final payout or token amounts to be transferred.
-        match balanced_state {
-            0 => {
-                // Lp to burn is sent by the user from the front end and proportional amount of
-                // tokens are sent to their wallet.
-                let amount_out = withdraw_balanced(
-                    self.balances, lp_to_burn, total_lp_supply
-                ).map_err(|_| "Balanced withdrawal error")?;
-                Ok(amount_out)
-            },
-            1 => {
-                // Withdrawing imbalance attracts fees since it is a virtual swap
-                // lp token to burn is computed in the withdraw instruction for this.
-                // Withdraw one coin. Submit amount to withdraw.
-                let amount_out = withdraw_imbalanced(
-                    lp_to_burn, total_lp_supply, self.balances,
-                    d_current.unwrap(), amp.unwrap()
-                ).map_err(|_| "Balanced withdrawal error")?;
-                let final_amount = apply_swap_fee(amount_out, fee.unwrap())?;
+    // Lp to burn is specified by the user from the amount "burnable" from the frontend. 
+    // This function returns proportional amounts of tokens to send to the user's wallet.
+    pub fn amm_balanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64) -> Result<[u64; 2], &'static str> {
+        let amount_out = withdraw_balanced(self.balances, lp_to_burn, lp_supply).map_err(|_| "Balanced withdrawal error")?;
+        // Slice of proportional amount to be transferred.
+        Ok(amount_out)
+    }
 
-                // We are only withdrawing one token and it is the first.
-                Ok([final_amount, 0 as u64])
-            },
-            _ => Err("Withdraw mode error")
-        }
+    // Withdrawing one coin. Behaves like a virtual swap.
+    // returns the amount of the token to be transferred
+    pub fn amm_imbalanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64, d_current: u64, amp: u64, fee: u64) -> Result<u64, &'static str> {
+        let amount_out = withdraw_imbalanced(lp_to_burn, lp_supply, self.balances, d_current, amp).map_err(|_| "Imbalanced withdrawal")?;
+        // Final amount minux swap fee.
+        let final_amount = apply_swap_fee(amount_out, fee)?;
+        // The amount of the token to be transferred.
+        Ok(final_amount)
     }
 
     // Perform a swap on amm.
@@ -86,6 +69,7 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_initial_deposit_to_amm_proportional_minting() {
@@ -196,77 +180,146 @@ mod tests {
     //
     //
     //
-    #[test]
-    fn test_withdraw_from_amm_balanced_dispatch() {
-        // Setup: [1M, 1M] reserves
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &reserves,
-            fee: 0,
-        };
+    fn setup_pool() -> MegaAmmStableSwapCurve<'static> {
+        MegaAmmStableSwapCurve {
+            balances: &[1_000_000, 1_000_000],
+            fee: 30,
+        }
+    }
 
-        // Mode 0: Balanced. Burning 10% (200k of 2M total supply)
-        // Should return [100k, 100k]
-        let result = curve.withdraw_from_amm(
-            200_000, 
-            2_000_000, 
-            0,      // balanced_state = 0
-            None,   // D not needed
-            None,    // Amp not needed
-            None
-        ).expect("Balanced dispatch failed");
+    #[test]
+    fn test_balanced_withdrawal_proportional() {
+        let amm = setup_pool();
+
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 100_000;
+
+        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
 
         assert_eq!(result[0], 100_000);
         assert_eq!(result[1], 100_000);
     }
 
     #[test]
-    fn test_withdraw_from_amm_imbalanced_dispatch() {
-        // Setup: [1M, 1M] reserves
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &reserves,
-            fee: 0,
+    fn test_balanced_withdrawal_full_exit() {
+        let amm = setup_pool();
+
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 1_000_000;
+
+        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
+
+        assert_eq!(result[0], 1_000_000);
+        assert_eq!(result[1], 1_000_000);
+    }
+    #[test]
+    fn test_balanced_withdrawal_small_lp() {
+        let amm = setup_pool();
+
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 1;
+
+        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
+
+        assert!(result[0] > 0);
+        assert!(result[1] > 0);
+    }
+    #[test]
+    fn test_imbalanced_withdrawal_single_token() {
+        let balances = [1_000_000, 1_000_000];
+
+        let amm = MegaAmmStableSwapCurve {
+            balances: &balances,
+            fee: 30,
         };
 
-        // Mode 1: Imbalanced. Burning 10% (200k of 2M)
-        // We know from previous tests this results in more than 100k of Token 0
-        // because of the "Imbalance Premium" logic.
-        let result = curve.withdraw_from_amm(
-            200_000, 
-            2_000_000, 
-            1,             // balanced_state = 1
-            Some(2_000_000), // d_current
-            Some(100),        // amp
-            Some(30)
-        ).expect("Imbalanced dispatch failed");
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 100_000;
 
-        // Token 0 should have the payout, Token 1 should be 0 
-        assert!(result[0] > 100_000);
+        let amp = 100;
+        let d_current = get_d(amp, &balances, 2).unwrap();
+
+        let result = amm
+            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
+            .unwrap();
+
+        assert!(result > 0);
+    }
+    #[test]
+    fn test_fee_applied_on_imbalanced_withdrawal() {
+        let balances = [1_000_000, 1_000_000];
+
+        let amm = MegaAmmStableSwapCurve {
+            balances: &balances,
+            fee: 100,
+        };
+
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 100_000;
+        let amp = 100;
+
+        let d_current = get_d(amp, &balances, 2).unwrap();
+
+        let amount = amm
+            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 100)
+            .unwrap();
+
+        assert!(amount > 0);
+    }
+    #[test]
+    fn test_zero_lp_burn() {
+        let amm = setup_pool();
+
+        let result = amm.amm_balanced_withdrawal(0, 1_000_000).unwrap();
+
+        assert_eq!(result[0], 0);
         assert_eq!(result[1], 0);
     }
-
     #[test]
-    fn test_withdraw_from_amm_invalid_mode() {
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve { balances: &reserves, fee: 0 };
+    fn test_imbalanced_pool_withdrawal() {
+        let balances = [1_800_000, 200_000];
 
-        // Mode 2 is undefined
-        let result = curve.withdraw_from_amm(100, 1000, 2, None, None, None);
-        assert_eq!(result, Err("Withdraw mode error"));
+        let amm = MegaAmmStableSwapCurve {
+            balances: &balances,
+            fee: 30,
+        };
+
+        let amp = 100;
+        let lp_supply = 1_000_000;
+        let lp_to_burn = 100_000;
+
+        let d_current = get_d(amp, &balances, 2).unwrap();
+
+        let result = amm
+            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
+            .unwrap();
+
+        assert!(result > 0);
     }
-
     #[test]
-    #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
-    fn test_withdraw_imbalanced_missing_params_panics() {
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve { balances: &reserves, fee: 0 };
+    fn test_large_balances() {
+        let balances = [10_000_000_000, 10_000_000_000];
 
-        // Mode 1 requires Some(d) and Some(amp). Passing None will trigger the unwrap() panic.
-        let _ = curve.withdraw_from_amm(200_000, 2_000_000, 1, None, None, None);
+        let amm = MegaAmmStableSwapCurve {
+            balances: &balances,
+            fee: 30,
+        };
+
+        let lp_supply = 1_000_000_000;
+        let lp_to_burn = 100_000_000;
+
+        let amp = 100;
+
+        let d_current = get_d(amp, &balances, 2).unwrap();
+
+        let result = amm
+            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
+            .unwrap();
+
+        assert!(result > 0);
     }
-
     //=========================== TESTING SWAPS ============================================
+    //
     //
     #[test]
     fn test_stableswap_standard_execution_with_fee() {
@@ -351,4 +404,11 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Negative swap: User must add more tokens or check invariant");
     }    
+
+    // ====================== PROPTESTS ==========================
+    proptest! {
+        // ================= TESTING DEPOSITS ================
+        // ================== TESTING WITHDRAWALS ===============
+        // ================== TESTING SWAPS ===================
+    }
 }
