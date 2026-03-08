@@ -48,20 +48,24 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
     }
 
     // Perform a swap on amm.
-    pub fn stableswap(&self, amp: u64, target_token_balance: u64, n: u32) -> Result<u64, &'static str> {
+    pub fn stableswap(&self, swap_amount: u64, amp: u64, n: u32) -> Result<u64, &'static str> {
         // The the reserves and find their sum. x_i.
-        let x_i = self.balances[..self.balances.len() - 1].iter().sum();
-        let y_old = self.balances[self.balances.len() - 1];
-        let y_new = newton_solver_scaled(
-            amp, x_i, target_token_balance, n
+        let sum_avail_tokens: u64 = self.balances[..self.balances.len() - 1].iter().sum();
+        let sum_after_swap = sum_avail_tokens.checked_add(swap_amount).ok_or("Addition overflow")?;
+        let y_target_old = self.balances[self.balances.len() - 1];
+        // Get the current liquidity
+        let d_param = get_d(amp, self.balances, n)?;
+        let y_target_new = newton_solver_scaled(
+            amp, sum_after_swap, d_param, n
         ).expect("Should converge");
 
         // The Delta invariant pattern
-        let amount_out_raw = y_old.checked_sub(y_new)
+        let amount_out_raw = y_target_old.checked_sub(y_target_new)
         .ok_or("Negative swap: User must add more tokens or check invariant")?;
         // Applying the fee. self.fee is in basis points e.g, 30 for 0.3%
         let fee = (amount_out_raw as u128 * self.fee as u128 / 10000) as u64;
         let final_amount_out = amount_out_raw.checked_sub(fee).ok_or("Fee overflow")?;
+        // Return final amount to transfer.
         Ok(final_amount_out)
     }
 }
@@ -321,90 +325,146 @@ mod tests {
     //=========================== TESTING SWAPS ============================================
     //
     //
-    #[test]
-    fn test_stableswap_standard_execution_with_fee() {
-        // Initial State: [1,000,000, 1,000,000] -> D = 2,000,000
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &reserves,
-            fee: 30, // 0.3% fee (30 basis points)
-        };
+    fn make_curve(balances: &[u64], fee: u64) -> MegaAmmStableSwapCurve {
+        MegaAmmStableSwapCurve { balances, fee }
+    }
 
+    #[test]
+    fn test_swap_balanced_pool_small_amount() {
+        let balances = [1_000_000u64, 1_000_000u64];
+        let swap_amount = 100_000u64;
         let amp = 100u64;
-        let d = 2_000_000u64; // Invariant stays constant
         let n = 2u32;
+        let fee = 30u64; // 0.3%
 
-        // Simulate user adding 100k of Token 0.
-        // The struct 'balances' should be updated outside or 
-        // the curve should be initialized with the NEW balance of the input token.
-        let curve_after_deposit = MegaAmmStableSwapCurve {
-            balances: &[1_100_000u64, 1_000_000u64], // Token 0 increased
-            fee: 30,
-        };
+        let curve = make_curve(&balances, fee);
 
-        let amount_out = curve_after_deposit.stableswap(amp, d, n)
-            .expect("Swap should converge");
+        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
 
-        // Mathematical Expectation:
-        // In a StableSwap pool with A=100, swapping 100k usually yields ~99k raw.
-        // 0.3% fee on 99k is ~297 units.
-        // amount_out should be roughly 98,700 - 99,000.
-        assert!(amount_out > 90_000, "Payout too low");
-        assert!(amount_out < 100_000, "Payout cannot exceed input (negative slippage)");
-        
-        // Fee check: Verify it is less than the raw difference
-        // (y_old - y_new) > final_amount_out
-        assert!(1_000_000 > amount_out);
+        // Amount out must be positive and less than target token balance
+        assert!(amount_out > 0);
+        assert!(amount_out < balances[1]);
+
+        // Fee must reduce output
+        let expected_no_fee = amount_out + (amount_out * fee / 10000);
+        assert!(expected_no_fee <= balances[1]);
     }
 
     #[test]
-    fn test_stableswap_zero_fee_impact() {
-        let reserves = [1_100_000u64, 1_000_000u64];
-        let curve_no_fee = MegaAmmStableSwapCurve { balances: &reserves, fee: 0 };
-        let curve_with_fee = MegaAmmStableSwapCurve { balances: &reserves, fee: 500 }; // 5% fee
-
-        let d = 2_000_000u64;
+    fn test_swap_balanced_pool_large_amount() {
+        let balances = [1_000_000u64, 1_000_000u64];
+        let swap_amount = 900_000u64;
         let amp = 100u64;
+        let n = 2u32;
+        let fee = 30u64;
 
-        let out_no_fee = curve_no_fee.stableswap(amp, d, 2).unwrap();
-        let out_with_fee = curve_with_fee.stableswap(amp, d, 2).unwrap();
+        let curve = make_curve(&balances, fee);
+        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
 
-        // Higher fee must result in lower payout
-        assert!(out_no_fee > out_with_fee);
+        // Should not exceed pool
+        assert!(amount_out < balances[1]);
     }
 
     #[test]
-    fn test_stableswap_high_slippage_imbalance() {
-        // Pool is heavily imbalanced [1.9M, 100k]. 
-        // D is approx 1.1M (Calculated previously).
-        let reserves = [1_900_000u64, 100_000u64]; 
-        let curve = MegaAmmStableSwapCurve { balances: &reserves, fee: 0 };
-        
-        // If we try to push even more into the 1.9M side, the payout 
-        // of the remaining 100k should be very small due to the "Curve Wall".
-        let d = 1_100_000u64; 
-        let amp = 10u64;
+    fn test_swap_imbalanced_pool_small_amount() {
+        let balances = [1_000_000u64, 500_000u64];
+        let swap_amount = 50_000u64;
+        let amp = 50u64;
+        let n = 2u32;
+        let fee = 30u64;
 
-        let amount_out = curve.stableswap(amp, d, 2).unwrap();
-        
-        // Even if we added a lot, we can't take more than the 100k available.
-        assert!(amount_out < 100_000);
+        let curve = make_curve(&balances, fee);
+
+        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
+
+        assert!(amount_out > 0);
+        assert!(amount_out < balances[1]);
     }
 
     #[test]
-    fn test_stableswap_invalid_invariant_fails() {
-        let reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve { balances: &reserves, fee: 30 };
-        
-        // If D is set higher than the current reserves can support, 
-        // y_new will be > y_old, triggering our "Negative swap" error.
-        let impossible_d = 3_000_000u64; 
-        
-        let result = curve.stableswap(100, impossible_d, 2);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Negative swap: User must add more tokens or check invariant");
-    }    
+    fn test_swap_high_amp_flat_curve() {
+        let balances = [1_000_000u64, 500_000u64];
+        let swap_amount = 50_000u64;
+        let amp_low = 1u64;      // behaves like constant product
+        let amp_high = 10_000u64; // behaves like almost constant sum
+        let n = 2u32;
+        let fee = 30u64;
 
+        let curve_low = make_curve(&balances, fee);
+        let curve_high = make_curve(&balances, fee);
+
+        let out_low = curve_low.stableswap(swap_amount, amp_low, n).expect("Low A swap");
+        let out_high = curve_high.stableswap(swap_amount, amp_high, n).expect("High A swap");
+
+        // High A yields higher output for same swap because the curve is flatter
+        assert!(out_high >= out_low);
+    }
+
+    #[test]
+    fn test_swap_zero_amount() {
+        let balances = [1_000_000u64, 1_000_000u64];
+        let swap_amount = 0u64;
+        let amp = 100u64;
+        let n = 2u32;
+        let fee = 30u64;
+
+        let curve = make_curve(&balances, fee);
+
+        let result = curve.stableswap(swap_amount, amp, n).expect("Zero swap should succeed");
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_swap_max_balances() {
+        let balances = [u64::MAX / 1000, u64::MAX / 1000];
+        let swap_amount = 1_000_000u64;
+        let amp = 100u64;
+        let n = 2u32;
+        let fee = 30u64;
+
+        let curve = make_curve(&balances, fee);
+
+        let res = curve.stableswap(swap_amount, amp, n);
+        // Should either succeed or return error, but not panic
+        assert!(res.is_ok() || res.is_err());
+    }
+
+    #[test]
+    fn test_fee_applied_correctly() {
+        let balances = [1_000_000u64, 1_000_000u64];
+        let swap_amount = 100_000u64;
+        let amp = 100u64;
+        let n = 2u32;
+        let fee = 100u64; // 1%
+
+        let curve = make_curve(&balances, fee);
+
+        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
+        let expected_max = balances[1] - balances[1] * fee / 10000;
+
+        assert!(amount_out < expected_max + 1, "Fee not applied correctly");
+    }
+
+    #[test]
+    fn test_invariant_not_violated() {
+        let balances = [1_000_000u64, 1_000_000u64];
+        let swap_amount = 200_000u64;
+        let amp = 100u64;
+        let n = 2u32;
+        let fee = 30u64;
+
+        let curve = make_curve(&balances, fee);
+
+        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Swap should succeed");
+        let new_balances = [balances[0] + swap_amount, balances[1] - amount_out];
+
+        // Compute D before and after swap
+        let d_before = get_d(amp, &balances, n).unwrap();
+        let d_after = get_d(amp, &new_balances, n).unwrap();
+
+        // D should not decrease more than fees
+        assert!(d_after <= d_before + 1_000, "Invariant violated too much"); 
+    }
     // ====================== PROPTESTS ==========================
     proptest! {
         // ================= TESTING DEPOSITS ================

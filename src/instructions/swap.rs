@@ -10,6 +10,7 @@ use crate::helpers::utils::{
 use crate::helpers::errors::MegaAmmProgramError;
 use pinocchio::sysvars::clock::Clock;
 use crate::config::{Config, AmmState};
+use crate::helpers::math_procs::curve_ops::MegaAmmStableSwapCurve;
 use constant_product_curve::{ConstantProduct, LiquidityPair};
 use solana_address;
 use pinocchio_log::log;
@@ -59,7 +60,7 @@ impl<'info> TryFrom<&'info [AccountView]> for SwapAccounts<'info> {
 
 pub struct SwapInstructionData {
     pub amount: u64,
-    pub min: u64,
+    pub min: u64, // Specify minimum slippage
     pub expiration: i64,
     pub is_x: u8, // Swap being performed from token X to Y, bool value (1 or 0)
 }
@@ -77,6 +78,9 @@ impl<'info> TryFrom<&'info [u8]> for SwapInstructionData {
         let is_x = data[24];
 
         if amount <= 0 || min <= 0 {
+            return Err(MegaAmmProgramError::InvalidInstructionData.into());
+        }
+        if is_x != 0 && is_x != 1 {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
 
@@ -112,7 +116,7 @@ impl<'info> Swap<'info> {
         }
 
         // Deserializing token accounts.
-        let (vault_x, vault_y, lp_supply) = {
+        let (vault_x_amount, vault_y_amount, lp_supply) = {
             let mint_data_ref = self.accounts.mint_lp.try_borrow()?;
             let mint_lp = unsafe {
                 pinocchio_token::state::Mint::from_bytes_unchecked(&mint_data_ref)
@@ -126,27 +130,7 @@ impl<'info> Swap<'info> {
             (v_x.amount(), v_y.amount(), mint_lp.supply())
         };
 
-        // Swap calculations
-        let mut curve = ConstantProduct::init(
-            vault_x,
-            vault_y,
-            lp_supply, // fake lp supply since lp supply is not necessary here.
-            amm_config.fee(),
-            None
-        ).map_err(|_| MegaAmmProgramError::InvalidInstructionData)?;
-
-        let p = match self.instruction_data.is_x == 1 {
-            true => LiquidityPair::X,
-            false => LiquidityPair::Y,
-        };
-        let swap_result = curve.swap(
-            p, self.instruction_data.amount, self.instruction_data.min
-        ).map_err(|_| MegaAmmProgramError::InvalidInstructionData)?;
-        // Checking for correct values
-        if swap_result.deposit == 0 || swap_result.withdraw == 0 {
-            return Err(ProgramError::InvalidArgument);
-        }
-
+        // Seed derivations for txn signing
         let seed_binding = amm_config.seed().to_le_bytes();
         let conf_bump_binding = amm_config.config_bump();
         let config_signer_seeds = [
@@ -158,13 +142,20 @@ impl<'info> Swap<'info> {
         ];
         let signer_seeds = [Signer::from(&config_signer_seeds)];
 
+        // Swap calculations with newton solver stableswap
+        // Balances should be in order, with the last representing token which is being swapped for
         if self.instruction_data.is_x == 1 {
+            // Withdrawing x, hence it is the last element in thelist
+            let balances = [vault_y_amount, vault_x_amount];
+            let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
+            // Getting the final amount of token x to send to the user for the swap.
+            let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
             // Swapping x for y, X from user to the pool.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.user_x_ata,
                 self.accounts.vault_x,
                 self.accounts.user,
-                swap_result.deposit,
+                self.instruction_data.amount,
                 None,
             )?;
             // Transfer token from pool to user for x.
@@ -172,16 +163,22 @@ impl<'info> Swap<'info> {
                 self.accounts.vault_y,
                 self.accounts.user_y_ata,
                 self.accounts.config,
-                swap_result.withdraw,
+                final_amount,
                 Some(&signer_seeds),
             )?;
+            return Ok(());
         } else {
+            // Withdrawing y, hence it is the last element in the list
+            let balances = [vault_x_amount, vault_y_amount];
+            let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
+            // Getting final amount of token y to send to the user.
+            let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
             // Swapping y for x, Y from user to the pool.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.user_y_ata,
                 self.accounts.vault_y,
                 self.accounts.user,
-                swap_result.deposit,
+                self.instruction_data.amount,
                 None,
             )?;
             // Transfer token from pool to user for y.
@@ -189,9 +186,10 @@ impl<'info> Swap<'info> {
                 self.accounts.vault_x,
                 self.accounts.user_x_ata,
                 self.accounts.config,
-                swap_result.withdraw,
+                final_amount,
                 Some(&signer_seeds),
             )?;
+            return Ok(());
         }
         Ok(())
     }
