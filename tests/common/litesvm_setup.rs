@@ -108,7 +108,8 @@ pub fn setup_initialized_amm() -> AmmTestContext {
 
     let tx_init = svm.send_transaction(tx);
     //println!("The amm initialization is {:#?}", tx_init);
-    println!("The amm fee at initialization is {}", 10);
+    println!("The amm fee configuration at initialization is {} basis points", 10);
+    let fee = 10;
 
     AmmTestContext {
         svm,
@@ -121,6 +122,7 @@ pub fn setup_initialized_amm() -> AmmTestContext {
         vault_y_ata,
         config_pda,
         lp_mint_pda,
+        fee
     }
 }
 

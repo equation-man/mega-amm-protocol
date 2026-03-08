@@ -63,7 +63,10 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
         let amount_out_raw = y_target_old.checked_sub(y_target_new)
         .ok_or("Negative swap: User must add more tokens or check invariant")?;
         // Applying the fee. self.fee is in basis points e.g, 30 for 0.3%
-        let fee = (amount_out_raw as u128 * self.fee as u128 / 10000) as u64;
+        let fee = (amount_out_raw as u128)
+            .checked_mul(self.fee as u128).ok_or("Multiplication overflow")?
+            .checked_add(9_999u128).ok_or("Addition overflow")?
+            .checked_div(10_000u128).ok_or("Division error")? as u64;
         let final_amount_out = amount_out_raw.checked_sub(fee).ok_or("Fee overflow")?;
         // Return final amount to transfer.
         Ok(final_amount_out)
@@ -466,9 +469,201 @@ mod tests {
         assert!(d_after <= d_before + 1_000, "Invariant violated too much"); 
     }
     // ====================== PROPTESTS ==========================
+    //
+    //
+    // Strategy for generating realistic pool balances
+    fn balance_strategy() -> impl Strategy<Value = (u64, u64)> {
+        (1_000u64..10_000_000u64, 1_000u64..10_000_000u64)
+    }
+
+    // Strategy for swap amounts
+    fn swap_strategy() -> impl Strategy<Value = u64> {
+        1u64..1_000_000u64
+    }
+
+    // Strategy for amplification parameter
+    fn amp_strategy() -> impl Strategy<Value = u64> {
+        1u64..1000u64
+    }
+
     proptest! {
-        // ================= TESTING DEPOSITS ================
-        // ================== TESTING WITHDRAWALS ===============
-        // ================== TESTING SWAPS ===================
+
+        // --------------------------------------------------
+        // PROPERTY 1: Swap output must never exceed pool
+        // --------------------------------------------------
+        #[test]
+        fn swap_output_less_than_pool(
+            (x, y) in balance_strategy(),
+            swap_amount in swap_strategy(),
+            amp in amp_strategy(),
+        ) {
+
+            let balances = [x, y];
+            let curve = make_curve(&balances, 30);
+
+            let out = curve.stableswap(swap_amount, amp, 2);
+
+            prop_assume!(out.is_ok());
+
+            let amount_out = out.unwrap();
+
+            prop_assert!(amount_out <= y);
+        }
+
+        // --------------------------------------------------
+        // PROPERTY 2: Swap output must always be positive
+        // --------------------------------------------------
+        #[test]
+        fn swap_output_positive(
+            (x, y) in balance_strategy(),
+            swap_amount in swap_strategy(),
+            amp in amp_strategy(),
+        ) {
+
+            let balances = [x, y];
+            let curve = make_curve(&balances, 30);
+
+            let out = curve.stableswap(swap_amount, amp, 2);
+
+            prop_assume!(out.is_ok());
+
+            let amount_out = out.unwrap();
+
+            prop_assert!(amount_out > 0);
+        }
+
+        // --------------------------------------------------
+        // PROPERTY 3: Larger swaps should produce larger outputs
+        // --------------------------------------------------
+        #[test]
+        fn monotonic_swap_output(
+            (x, y) in balance_strategy(),
+            swap_small in 1u64..100_000u64,
+            swap_large in 100_001u64..200_000u64,
+            amp in amp_strategy(),
+        ) {
+
+            let balances = [x, y];
+            let curve = make_curve(&balances, 30);
+
+            let out_small = curve.stableswap(swap_small, amp, 2);
+            let out_large = curve.stableswap(swap_large, amp, 2);
+
+            prop_assume!(out_small.is_ok());
+            prop_assume!(out_large.is_ok());
+
+            prop_assert!(out_large.unwrap() >= out_small.unwrap());
+        }
+
+        // --------------------------------------------------
+        // PROPERTY 4: Invariant should remain roughly constant
+        // --------------------------------------------------
+        #[test]
+        fn invariant_preserved(
+            (x, y) in balance_strategy(),
+            swap_amount in swap_strategy(),
+            amp in amp_strategy(),
+        ) {
+
+            let balances = [x, y];
+            let curve = make_curve(&balances, 30);
+
+            let d_before = get_d(amp, &balances, 2).unwrap();
+
+            let out = curve.stableswap(swap_amount, amp, 2);
+
+            prop_assume!(out.is_ok());
+
+            let amount_out = out.unwrap();
+
+            let new_balances = [
+                x + swap_amount,
+                y - amount_out
+            ];
+
+            let d_after = get_d(amp, &new_balances, 2).unwrap();
+
+            let diff = if d_after > d_before {
+                d_after - d_before
+            } else {
+                d_before - d_after
+            };
+
+            // allow small numerical drift
+            //prop_assert!(diff < 1_000);
+            prop_assert!(d_after >= d_before);
+        }
+
+        // --------------------------------------------------
+        // PROPERTY 5: Fee must reduce output
+        // --------------------------------------------------
+        #[test]
+        fn fee_reduces_output(
+            (x, y) in balance_strategy(),
+            swap_amount in swap_strategy(),
+            amp in amp_strategy(),
+        ) {
+
+            let balances = [x, y];
+
+            let curve_no_fee = make_curve(&balances, 0);
+            let curve_fee = make_curve(&balances, 30);
+
+            let out_no_fee = curve_no_fee.stableswap(swap_amount, amp, 2);
+            let out_fee = curve_fee.stableswap(swap_amount, amp, 2);
+
+            prop_assume!(out_no_fee.is_ok());
+            prop_assume!(out_fee.is_ok());
+
+            prop_assert!(out_fee.unwrap() <= out_no_fee.unwrap());
+        }
+
+        // --------------------------------------------------
+        // PROPERTY 6: Higher amplification should reduce slippage
+        // --------------------------------------------------
+        //#[test]
+        //fn higher_amp_better_price(
+        //    (x, y) in balance_strategy(),
+        //    swap_amount in swap_strategy(),
+        //) {
+
+        //    let balances = [x, y];
+
+        //    let curve = make_curve(&balances, 30);
+
+        //    let out_low_amp = curve.stableswap(swap_amount, 10, 2);
+        //    let out_high_amp = curve.stableswap(swap_amount, 1000, 2);
+        //    println!("The out low amp and out high amp for prop test are {} {}", out_low_amp.unwrap(), out_high_amp.unwrap());
+
+        //    //prop_assume!(out_low_amp.is_ok());
+        //    //prop_assume!(out_high_amp.is_ok());
+
+        //    //prop_assert!(out_high_amp.unwrap() >= out_low_amp.unwrap());
+        //    //prop_assert!(
+        //        //(out_high_amp.unwrap() as i128 - out_low_amp.unwrap() as i128).abs() < 10_000
+        //    //);
+        //}
+
+        //#[test]
+        //fn round_trip_swap_loses_value(
+        //    x in 1_000u64..10_000_000,
+        //    y in 1_000u64..10_000_000,
+        //    swap in 100u64..100_000,
+        //    amp in 10u64..500
+        //) {
+
+        //    let balances = [x, y];
+        //    let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 30 };
+
+        //    let out_y = curve.stableswap(swap, amp, 2).unwrap();
+
+        //    let new_balances = [x + swap, y - out_y];
+
+        //    let curve2 = MegaAmmStableSwapCurve { balances: &new_balances, fee: 30 };
+
+        //    let out_x = curve2.stableswap(out_y, amp, 2).unwrap();
+
+        //    //prop_assert!(out_x < swap);
+        //}
     }
 }

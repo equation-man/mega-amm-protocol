@@ -35,8 +35,10 @@ Here the system solves for invariant new D using Newton solver.
 
 #### Swap  
 Users or traders swaps a token for another.  
-- Here, the amount and the token to swap is provided.
-- The tokens are then swapped as necessary.  
+- Here, the amount and the token to swap is provided for target token
+- The token is added to the pool
+- Use the stableswap invariant D to solve for new balance Y
+- Return dy minus the fee
 
 #### Withdrawal  
 There are two types of withdrawals. A balanced withdrawal where no solver is required, and 

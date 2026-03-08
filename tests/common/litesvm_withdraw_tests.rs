@@ -60,9 +60,9 @@ pub fn withdraw_liquidity(ctx: &mut AmmTestContext, deposit: &DepositTestContext
 
     let withdraw_res = ctx.svm.send_transaction(tx);
     //println!("The withdraw res is {:#?}", withdraw_res);
-    println!("The amount withdrawn is: {}", 500);
+    //println!("The amount withdrawn is: {}", 500);
     let vault_x_balance = get_token_balance(&ctx.svm, &ctx.vault_x_ata);
     let vault_y_balance = get_token_balance(&ctx.svm, &ctx.vault_y_ata);
-    println!("The vault x balance after pool withdrawal: {}", vault_x_balance);
-    println!("The vault y balance after pool withdrawal: {}", vault_y_balance);
+    //println!("The vault x balance after pool withdrawal: {}", vault_x_balance);
+    //println!("The vault y balance after pool withdrawal: {}", vault_y_balance);
 }

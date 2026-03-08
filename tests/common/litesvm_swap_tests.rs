@@ -63,18 +63,20 @@ pub fn swap_tokens(ctx: &mut AmmTestContext) {
     data.extend_from_slice(&expiration.to_le_bytes());
     data.push(is_x);
 
-    // Vault balances.
-    let x_vault_after = get_token_balance(svm, &ctx.vault_x_ata);
-    let y_vault_after = get_token_balance(svm, &ctx.vault_y_ata);
-    println!("The balance in the vault x is {}", x_vault_after);
-    println!("The balance in the vault y is {}", y_vault_after);
+    // Vault balances before swap.
+    let x_vault_before_swap = get_token_balance(svm, &ctx.vault_x_ata);
+    let y_vault_before_swap = get_token_balance(svm, &ctx.vault_y_ata);
+    println!("The balance in the vault x before swap is {}", x_vault_before_swap);
+    println!("The balance in the vault y before swap is {}", y_vault_before_swap);
     println!("================================================");
-    let x_before = get_token_balance(svm, &user_x_ata);
-    let y_before = get_token_balance(svm, &user_y_ata);
+    // token balances before swaps
+    let x_before_swap = get_token_balance(svm, &user_x_ata);
+    let y_before_swap = get_token_balance(svm, &user_y_ata);
 
-    println!("User ata balance for X before swap: {}", x_before);
-    println!("User ata balance for Y before swap: {}", y_before);
-    println!("The amount of token X to be swapped: {}", amount);
+    println!("User ata balance for X before swap: {}", x_before_swap);
+    println!("User ata balance for Y before swap: {}", y_before_swap);
+    println!("The amount of token X to be swapped for y: {}", amount);
+    println!("The fee charge is {} basis points", ctx.fee);
     println!("================================================");
 
     // Build Instruction
@@ -108,21 +110,27 @@ pub fn swap_tokens(ctx: &mut AmmTestContext) {
     let result = svm.send_transaction(tx);
     //println!("Swap result: {:#?}", result);
 
-    // Validate balances changed
-    let x_after = get_token_balance(svm, &user_x_ata);
-    let y_after = get_token_balance(svm, &user_y_ata);
+    // Validate balances from the user's wallet
+    let x_after_swap = get_token_balance(svm, &user_x_ata);
+    let y_after_swap = get_token_balance(svm, &user_y_ata);
 
+    // Token balance from the pool
     let x_vault_after_swap = get_token_balance(svm, &ctx.vault_x_ata);
     let y_vault_after_swap = get_token_balance(svm, &ctx.vault_y_ata);
 
 
-    println!("User ata balance for X after swap: {}", x_after);
-    println!("User ata balance for Y after swap(minus swap fees): {}", y_after);
+    println!("User ata balance for X after swap: {}", x_after_swap);
+    println!("User ata balance for Y after swap(minus swap fees): {}", y_after_swap);
     println!("=============================================================");
     println!("The balance in the vault x after swap is {}", x_vault_after_swap);
     println!("The balance in the vault y after swap is {}", y_vault_after_swap);
     println!("=============================================================");
 
+    // Return some amount of the other token that should be greater than 0.
+    // Here we are swapping x, so y should be greater than 0.
+    // Or we should have more y in the wallet than before and less y in the pool than before
+    // We should have less x in the wallet than before and more x in the pool than before
+    // We should have less x in the wallet than before and more x in the pool than before
     //assert!(x_after < 100_000);
     //assert!(y_after > 0);
 }
