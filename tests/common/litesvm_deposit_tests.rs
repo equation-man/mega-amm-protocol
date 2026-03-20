@@ -29,7 +29,8 @@ use litesvm_setup::{
 use crate::common::context::{DepositTestContext, AmmTestContext};
 
 
-pub fn deposit_liquidity(ctx: &mut AmmTestContext) -> DepositTestContext {
+/// We are depositing balances to the pool, x_amount and y_amount.
+pub fn deposit_liquidity(ctx: &mut AmmTestContext, x_amount: u64, y_amount: u64) -> DepositTestContext {
     //let mut ctx = setup_initialized_amm();
 
     let user = Keypair::new();
@@ -40,12 +41,12 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext) -> DepositTestContext {
     let user_x_ata = create_ata(
         &mut ctx.svm, &user, &ctx.mint_x, &user.pubkey()
     );
-    mint_tokens(&mut ctx.svm, &ctx.initializer, &ctx.mint_x, &user_x_ata, 1_000_000_000);
+    mint_tokens(&mut ctx.svm, &ctx.initializer, &ctx.mint_x, &user_x_ata, x_amount);
     //println!("The user x ata balance is {}", get_token_balance(&ctx.svm, &user_x_ata));
     let user_y_ata = create_ata(
         &mut ctx.svm, &user, &ctx.mint_y, &user.pubkey()
     );
-    mint_tokens(&mut ctx.svm, &ctx.initializer, &ctx.mint_y, &user_y_ata, 1_000_000_000);
+    mint_tokens(&mut ctx.svm, &ctx.initializer, &ctx.mint_y, &user_y_ata, y_amount);
     //println!("The user y ata balance is {}", get_token_balance(&ctx.svm, &user_y_ata));
 
     // Here the mint is already available. Tokens will be minted here, for liquidity providers
@@ -56,7 +57,7 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext) -> DepositTestContext {
 
     // Build deposit instruction.
     let deposit_ix_data = build_deposit_ix_data(
-        1_000_000u64, 1_000_000u64, i64::MAX,
+        x_amount, y_amount, i64::MAX,
     );
 
     let accounts = vec![

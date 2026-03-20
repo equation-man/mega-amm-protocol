@@ -59,8 +59,8 @@ impl<'info> TryFrom<&'info [AccountView]> for SwapAccounts<'info> {
 }
 
 pub struct SwapInstructionData {
-    pub amount: u64,
-    pub min: u64, // Specify minimum slippage
+    pub amount: u64, // Amount to swap
+    pub min: u64, // Minimum slippage. Min to receive below which it's bad pricing
     pub expiration: i64,
     pub is_x: u8, // Swap being performed from token X to Y, bool value (1 or 0)
 }
@@ -150,6 +150,14 @@ impl<'info> Swap<'info> {
             let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
             // Getting the final amount of token x to send to the user for the swap.
             let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
+
+            // Slippage protection.
+            log!("The amount out is {}", final_amount);
+            if final_amount < self.instruction_data.min {
+                log!("Slippage protection");
+                return Err(MegaAmmProgramError::SlippageExceeded.into());
+            }
+
             // Swapping x for y, X from user to the pool.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.user_x_ata,
@@ -158,6 +166,7 @@ impl<'info> Swap<'info> {
                 self.instruction_data.amount,
                 None,
             )?;
+            
             // Transfer token from pool to user for x.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.vault_y,

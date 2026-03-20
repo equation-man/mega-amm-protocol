@@ -12,6 +12,7 @@ pub enum MegaAmmProgramError {
     InvalidAddress = 5,
     NotEnoughAccountKeys = 6,
     InvalidSignature = 7,
+    SlippageExceeded = 8,
 }
 
 impl From<MegaAmmProgramError> for P {
