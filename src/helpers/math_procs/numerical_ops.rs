@@ -55,7 +55,7 @@ pub fn get_d(amp_param: u64, balances_param: &[u64], n_param: u32) -> Result<u64
         n.checked_pow(n as u32).ok_or("Power error for Ann")?
         ).ok_or("Multiplication with Ann error")?;
 
-    for _ in 0..64 {
+    for _ in 0..10 {
         let mut d_p = d;
         for x in balances {
             let safe_x = if x == 0 { 1u128 } else { x }; d_p = d_p.checked_mul(d).ok_or("Overflow error for product term")?

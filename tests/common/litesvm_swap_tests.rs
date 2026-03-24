@@ -240,7 +240,7 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
     // Executing the transaction
     let result = svm.send_transaction(tx);
 
-    println!("Swap result for zero amount: {:#?}", result);
+    //println!("Swap result for zero amount: {:#?}", result);
 
     // Validate balances from the user's wallet
     let x_after_swap = get_token_balance(svm, &user_x_ata);
@@ -295,11 +295,11 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
 
     // Mint tokens to user the token to swap, here, x
     mint_tokens(
-        svm,
-        user,
-        &ctx.mint_x,
-        &user_x_ata,
-        1_000_000,
+        svm, user, &ctx.mint_x, &user_x_ata, 200_000_000,
+    );
+    // Mint tokens y to the user for swap testing here.
+    mint_tokens(
+        svm, user, &ctx.mint_y, &user_y_ata, 100_000_000
     );
 
     // Build Swap Instruction with zero amount

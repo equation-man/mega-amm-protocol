@@ -49,18 +49,24 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
 
     // Perform a swap on amm.
     pub fn stableswap(&self, swap_amount: u64, amp: u64, n: u32) -> Result<u64, &'static str> {
-        // The the reserves and find their sum. x_i.
+        // The the reserves and find their sum. x_i. The last token in this list is the one to be
+        // sent back to the user for the swap
         let sum_avail_tokens: u64 = self.balances[..self.balances.len() - 1].iter().sum();
+        log!("Token balance for y before swap is {}, y swap amount {}", sum_avail_tokens, swap_amount);
         let sum_after_swap = sum_avail_tokens.checked_add(swap_amount).ok_or("Addition overflow")?;
-        let y_target_old = self.balances[self.balances.len() - 1];
+        log!("The total amount of y when amount to be swapped for x is added is {}", sum_after_swap);
+        let target_old = self.balances[self.balances.len() - 1];
+        log!("The old x value is {}", target_old);
         // Get the current liquidity
         let d_param = get_d(amp, self.balances, n)?;
-        let y_target_new = newton_solver_scaled(
+        log!("The d_param is {}", d_param);
+        let target_new = newton_solver_scaled(
             amp, sum_after_swap, d_param, n
         ).expect("Should converge");
+        log!("The x new is {}", target_new);
 
         // The Delta invariant pattern
-        let amount_out_raw = y_target_old.checked_sub(y_target_new)
+        let amount_out_raw = target_old.checked_sub(target_new)
         .ok_or("Negative swap: User must add more tokens or check invariant")?;
         // Applying the fee. self.fee is in basis points e.g, 30 for 0.3%
         let fee = (amount_out_raw as u128)

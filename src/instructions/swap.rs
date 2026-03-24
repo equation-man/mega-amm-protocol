@@ -145,14 +145,15 @@ impl<'info> Swap<'info> {
         // Swap calculations with newton solver stableswap
         // Balances should be in order, with the last representing token which is being swapped for
         if self.instruction_data.is_x == 1 {
-            // Withdrawing x, hence it is the last element in thelist
+            // 1.Withdrawing x, hence it is the last element in thelist
             let balances = [vault_y_amount, vault_x_amount];
             let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
             // Getting the final amount of token x to send to the user for the swap.
-            let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
+            log!("Calculating the amount out for x swap");
+            let final_amount = curve.stableswap(self.instruction_data.amount, 2, 2).map_err(|_| ProgramError::Custom(2))?;
 
             // Slippage protection.
-            log!("The amount out is {}", final_amount);
+            log!("The amount out for x swap is {}", final_amount);
             if final_amount < self.instruction_data.min {
                 log!("Slippage protection");
                 return Err(MegaAmmProgramError::SlippageExceeded.into());
@@ -167,7 +168,7 @@ impl<'info> Swap<'info> {
                 None,
             )?;
             
-            // Transfer token from pool to user for x.
+            // Transfer token y from pool to user for x.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.vault_y,
                 self.accounts.user_y_ata,
@@ -177,12 +178,20 @@ impl<'info> Swap<'info> {
             )?;
             return Ok(());
         } else {
-            // Withdrawing y, hence it is the last element in the list
+            // 0. Withdrawing y, hence it is the last element in the list
             let balances = [vault_x_amount, vault_y_amount];
             let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
             // Getting final amount of token y to send to the user.
             let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
-            // Swapping y for x, Y from user to the pool.
+
+            // Slippage protection.
+            log!("The amount out for y swap is {}", final_amount);
+            if final_amount < self.instruction_data.min {
+                log!("Slippage protection");
+                return Err(MegaAmmProgramError::SlippageExceeded.into());
+            }
+
+            // Swapping y for x, transfer tokens Y from user to the pool.
             TokenAccount::transfer_spl_tokens(
                 self.accounts.user_y_ata,
                 self.accounts.vault_y,
