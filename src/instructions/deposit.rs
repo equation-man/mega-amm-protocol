@@ -18,7 +18,6 @@ use crate::helpers::utils::{
 use crate::helpers::errors::MegaAmmProgramError;
 use crate::helpers::math_procs::curve_ops::MegaAmmStableSwapCurve;
 use crate::config::{Config, AmmState};
-use constant_product_curve::ConstantProduct;
 use solana_address;
 use pinocchio_log::log;
 
@@ -160,11 +159,13 @@ impl<'info> Deposit<'info> {
         // We provide the amounts of token x and y that we want to deposit 
         // in the liquidity pool.
         let balances = [vault_x_amount, vault_y_amount];
-        let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0 };
-        let mint_lp_from_newton = curve.deposit_to_amm(
-            100u64, lp_supply, balances.len() as u32,
-            &[self.instruction_data.amount_x, self.instruction_data.amount_y]
-        ).map_err(|e| { log!("The error is {}", e); ProgramError::Custom(0)})?;
+        let curve = MegaAmmStableSwapCurve { balances: &balances, target_token_idx: None, fee_bps: 0 };
+        let new_x = vault_x_amount.checked_add(self.instruction_data.amount_x).ok_or( ProgramError::Custom(0) )?;
+        let new_y = vault_y_amount.checked_add(self.instruction_data.amount_y).ok_or( ProgramError::Custom(0) )?;
+        let new_balances = [new_x, new_y];
+        let mint_lp_amount = curve.deposit_to_amm(
+            100u64, lp_supply, &new_balances
+        ).map_err(|e| { ProgramError::Custom(0) })?;
 
         // Transfer tokens(x & y) from ata to vaults/token accounts of the pool.
         // Amount to transfer is calculated from the lp token to be minted.
@@ -202,7 +203,7 @@ impl<'info> Deposit<'info> {
             self.accounts.mint_lp,
             self.accounts.user_lp_ata,
             self.accounts.mint_lp,
-            mint_lp_from_newton,
+            mint_lp_amount,
             &mint_signer,
         )?;
         Ok(())

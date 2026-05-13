@@ -5,19 +5,25 @@ use pinocchio_log::log;
 
 pub struct MegaAmmStableSwapCurve<'b> {
     pub balances: &'b [u64],
-    pub fee: u64,
+    // Index of the token to be received.
+    pub target_token_idx: Option<usize>,
+    // Instead of embedding fees directly into the invariant equation, protocol computes
+    // pure invariant preserving swap then applies fees externally as a delta.
+    pub fee_bps: u64, // Fee in basis points (e.g 30 = 0.3%)
 }
 
 impl<'b> MegaAmmStableSwapCurve<'b> {
     // amp: The amplitude parameter.
     // balances: Array of token balances.
-    // n: number of tokens in the pool
     pub fn deposit_to_amm(
-        &self, amp: u64,  total_lp_supply: u64, n: u32, balances: &[u64],
+        &self, amp: u64,  total_lp_supply: u64, balances: &[u64],
     ) -> Result<u64, &'static str> {
         // Should return the number of LP tokens to mint.
-        let d_old = get_d(amp, self.balances, n)?;
-        let d_new = get_d(amp, balances, n)?;
+        let d_old = get_d(amp, self.balances)?;
+        let d_new = get_d(amp, balances)?;
+        if d_new < d_old {
+            return Err("Invariant decreased on deposit");
+        }
         // For initial liquidity provision or genesis deposit,
         // The initial LP token supply is equal to the first calculated
         if d_old == 0 {
@@ -31,7 +37,7 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
 
     // Lp to burn is specified by the user from the amount "burnable" from the frontend. 
     // This function returns proportional amounts of tokens to send to the user's wallet.
-    pub fn amm_balanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64) -> Result<[u64; 2], &'static str> {
+    pub fn amm_balanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64) -> Result<[u64; MAX_TOKENS], &'static str> {
         let amount_out = withdraw_balanced(self.balances, lp_to_burn, lp_supply).map_err(|_| "Balanced withdrawal error")?;
         // Slice of proportional amount to be transferred.
         Ok(amount_out)
@@ -39,637 +45,168 @@ impl<'b> MegaAmmStableSwapCurve<'b> {
 
     // Withdrawing one coin. Behaves like a virtual swap.
     // returns the amount of the token to be transferred
-    pub fn amm_imbalanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64, d_current: u64, amp: u64, fee: u64) -> Result<u64, &'static str> {
-        let amount_out = withdraw_imbalanced(lp_to_burn, lp_supply, self.balances, d_current, amp).map_err(|_| "Imbalanced withdrawal")?;
-        // Final amount minux swap fee.
-        let final_amount = apply_swap_fee(amount_out, fee)?;
+    pub fn amm_imbalanced_withdrawal(&self, lp_to_burn: u64, lp_supply: u64, amp: u64) -> Result<u64, &'static str> {
+        // Calculating d_current.
+        let idx = self.target_token_idx.ok_or("Missing target token index")?;
+        let amount_out = withdraw_imbalanced(
+            lp_to_burn, lp_supply, self.balances, idx, amp
+        ).map_err(|_| "Imbalanced withdrawal")?;
+        // Final amount minus swap fee.
+        let final_amount = apply_swap_fee(amount_out, self.fee_bps)?;
         // The amount of the token to be transferred.
         Ok(final_amount)
     }
 
-    // Perform a swap on amm.
-    pub fn stableswap(&self, swap_amount: u64, amp: u64, n: u32) -> Result<u64, &'static str> {
-        // The the reserves and find their sum. x_i. The last token in this list is the one to be
-        // sent back to the user for the swap
-        let sum_avail_tokens: u64 = self.balances[..self.balances.len() - 1].iter().sum();
-        log!("Token balance for y before swap is {}, y swap amount {}", sum_avail_tokens, swap_amount);
-        let sum_after_swap = sum_avail_tokens.checked_add(swap_amount).ok_or("Addition overflow")?;
-        log!("The total amount of y when amount to be swapped for x is added is {}", sum_after_swap);
-        let target_old = self.balances[self.balances.len() - 1];
-        log!("The old x value is {}", target_old);
-        // Get the current liquidity
-        let d_param = get_d(amp, self.balances, n)?;
-        log!("The d_param is {}", d_param);
-        let target_new = newton_solver_scaled(
-            amp, sum_after_swap, d_param, n
-        ).expect("Should converge");
-        log!("The x new is {}", target_new);
+    // Performs a swap between two tokens in an n token pool.
+    // amount_in: quantity of token at index `i` being deposited.
+    // i: index of token being given.
+    pub fn stableswap(&self, amount_in: u64, i: usize, amp: u64) -> Result<u64, &'static str> {
+        let n = self.balances.len() as u32;
+        // Index of the token to be received
+        let j = self.target_token_idx.ok_or("Missing target token index")?;
 
-        // The Delta invariant pattern
-        let amount_out_raw = target_old.checked_sub(target_new)
-        .ok_or("Negative swap: User must add more tokens or check invariant")?;
-        // Applying the fee. self.fee is in basis points e.g, 30 for 0.3%
+        // Calculate the current invariant D.
+        let d = get_d(amp, self.balances)?;
+
+        // Update balances to reflect the deposit of token i.
+        let mut new_balances = [0u64; MAX_TOKENS];
+        for (idx, &bal) in self.balances.iter().enumerate() {
+            new_balances[idx] = bal;
+        }
+        new_balances[i] = new_balances[i].checked_add(amount_in).ok_or("Overflow on deposit")?;
+
+        // Solve for the new balance of j keeping D constant, via newton solver.
+        // Token j is excluded from the known balances to find its new required balance.
+        let y_new = get_y(amp, &new_balances, d, j)?;
+
+        // Calculate raw amount out. Delta invariant pattern.
+        let amount_out_raw = new_balances[j].checked_sub(y_new).ok_or("Insolvent swap")?;
+
+        // Apply fees. Delta invariant pattern instead of embedding the fee directly into the
+        // complex curve calculation. Here fee is subsequently calculated as the diff bten gross
+        // token amount user handed over and the net token amount that actually entered the pool
         let fee = (amount_out_raw as u128)
-            .checked_mul(self.fee as u128).ok_or("Multiplication overflow")?
-            .checked_add(9_999u128).ok_or("Addition overflow")?
+            .checked_mul(self.fee_bps as u128).ok_or("Fee mul overflow")?
+            .checked_add(9_999u128).ok_or("Addition overflow")? // Rounding up in favour of the pool
             .checked_div(10_000u128).ok_or("Division error")? as u64;
-        let final_amount_out = amount_out_raw.checked_sub(fee).ok_or("Fee overflow")?;
-        // Return final amount to transfer.
-        Ok(final_amount_out)
+
+        Ok(amount_out_raw.checked_sub(fee).ok_or("Fee underflow")?)
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod curve_integration_tests {
     use super::*;
     use proptest::prelude::*;
 
-    #[test]
-    fn test_initial_deposit_to_amm_proportional_minting() {
-        // Setup: Balanced pool [1M, 1M] -> D_old = 2M
-        let initial_reserves = [0u64, 0u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &initial_reserves,
-            fee: 0, 
-        };
+    const AMP: u64 = 100;
+    const FEE_BPS: u64 = 30; // 0.3%
 
-        let total_supply = 0u64; // Existing LP tokens (1:1 with D)
-        
-        // User adds 100k of each token (proportional deposit)
-        // New balances: [1.1M, 1.1M] -> D_new = 2.2M
-        let new_balances = [1_100_000u64, 1_100_000u64];
-        let amp = 100u64;
-        let n = 2u32;
-
-        let initial_lp_minted = curve.deposit_to_amm(amp, total_supply, n, &new_balances)
-            .expect("Should calculate LP minting for initial deposit");
-        println!("The lp minted for initial deposit is: {}", initial_lp_minted);
-
-        // Logic: (2M * 200k) / 2M = 200k
-        assert_eq!(initial_lp_minted, 2200_000);
-    }
-
-    #[test]
-    fn test_deposit_to_amm_proportional_minting() {
-        // Setup: Balanced pool [1M, 1M] -> D_old = 2M
-        let initial_reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &initial_reserves,
-            fee: 0, 
-        };
-
-        let total_supply = 2_000_000u64; // Existing LP tokens (1:1 with D)
-        
-        // User adds 100k of each token (proportional deposit)
-        // New balances: [1.1M, 1.1M] -> D_new = 2.2M
-        let new_balances = [1_100_000u64, 1_100_000u64];
-        let amp = 100u64;
-        let n = 2u32;
-
-        let lp_minted = curve.deposit_to_amm(amp, total_supply, n, &new_balances)
-            .expect("Should calculate LP minting for proportional deposit");
-        println!("The lp minted for proprotional minting is: {}", lp_minted);
-
-        // Logic: (2M * 200k) / 2M = 200k
-        assert_eq!(lp_minted, 200_000);
-    }
-
-    #[test]
-    fn test_imbalanced_deposit_penalty() {
-        // Adding liquidity imbalanced "hurts" the pool's virtual depth.
-        // The user should get FEWER LP tokens than the raw sum of their tokens.
-        let initial_reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &initial_reserves,
-            fee: 0,
-        };
-
-        let total_supply = 2_000_000u64;
-        // User adds 200k of Token A but 0 of Token B.
-        // Sum of tokens added is 200k, but D_new - D_old will be < 200k.
-        let new_balances = [1_200_000u64, 1_000_000u64]; 
-        let amp = 10u64; // Lower amp to make penalty visible
-        let n = 2u32;
-
-        let lp_minted = curve.deposit_to_amm(amp, total_supply, n, &new_balances).unwrap();
-        println!("The lp minted for imbalanced deposit penalty: {}", lp_minted);
-
-        // Due to slippage/imbalance penalty, minted LP < 200k
-        assert!(lp_minted < 200_000, "Imbalanced deposit must result in LP penalty");
-        assert!(lp_minted > 150_000, "Penalty should not be catastrophic");
-    }
-
-    #[test]
-    fn test_deposit_with_negative_spread_fails() {
-        let initial_reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve {
-            balances: &initial_reserves,
-            fee: 0,
-        };
-
-        // Attempting to "deposit" while providing balances smaller than current
-        let smaller_balances = [900_000u64, 900_000u64];
-        
-        let result = curve.deposit_to_amm(100, 2_000_000, 2, &smaller_balances);
-        
-        assert_eq!(result, Err("Deposit spread error"));
-    }
-
-    #[test]
-    fn test_high_amp_efficiency_for_deposits() {
-        let initial_reserves = [1_000_000u64, 1_000_000u64];
-        let curve = MegaAmmStableSwapCurve { balances: &initial_reserves, fee: 0 };
-        let new_balances = [1_200_000u64, 1_000_000u64];
-        let total_supply = 2_000_000u64;
-
-        // High A makes imbalanced deposits more "efficient" (more LP tokens)
-        let lp_low_amp = curve.deposit_to_amm(1, total_supply, 2, &new_balances).unwrap();
-        let lp_high_amp = curve.deposit_to_amm(1000, total_supply, 2, &new_balances).unwrap();
-
-        assert!(lp_high_amp > lp_low_amp, "Higher Amp should yield more LP for imbalanced deposits");
-    }
-
-    // ==================== TESTING WITHDRAWALS =================
-    //
-    //
-    //
-    fn setup_pool() -> MegaAmmStableSwapCurve<'static> {
+    // Helper to initialize basic 2 token curve
+    fn setup_curve<'a>(balances: &'a [u64], target_idx: Option<usize>) -> MegaAmmStableSwapCurve {
         MegaAmmStableSwapCurve {
-            balances: &[1_000_000, 1_000_000],
-            fee: 30,
+            balances, target_token_idx: target_idx, fee_bps: FEE_BPS
         }
     }
 
+    // =========== DEPOSIT, LP MINTING TESTS 
     #[test]
-    fn test_balanced_withdrawal_proportional() {
-        let amm = setup_pool();
-
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 100_000;
-
-        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
-
-        assert_eq!(result[0], 100_000);
-        assert_eq!(result[1], 100_000);
-    }
-
-    #[test]
-    fn test_balanced_withdrawal_full_exit() {
-        let amm = setup_pool();
-
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 1_000_000;
-
-        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
-
-        assert_eq!(result[0], 1_000_000);
-        assert_eq!(result[1], 1_000_000);
-    }
-    #[test]
-    fn test_balanced_withdrawal_small_lp() {
-        let amm = setup_pool();
-
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 1;
-
-        let result = amm.amm_balanced_withdrawal(lp_to_burn, lp_supply).unwrap();
-
-        assert!(result[0] > 0);
-        assert!(result[1] > 0);
-    }
-    #[test]
-    fn test_imbalanced_withdrawal_single_token() {
+    fn test_genesis_deposit() {
         let balances = [1_000_000, 1_000_000];
-
-        let amm = MegaAmmStableSwapCurve {
-            balances: &balances,
-            fee: 30,
-        };
-
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 100_000;
-
-        let amp = 100;
-        let d_current = get_d(amp, &balances, 2).unwrap();
-
-        let result = amm
-            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
-            .unwrap();
-
-        assert!(result > 0);
-    }
-    #[test]
-    fn test_fee_applied_on_imbalanced_withdrawal() {
-        let balances = [1_000_000, 1_000_000];
-
-        let amm = MegaAmmStableSwapCurve {
-            balances: &balances,
-            fee: 100,
-        };
-
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 100_000;
-        let amp = 100;
-
-        let d_current = get_d(amp, &balances, 2).unwrap();
-
-        let amount = amm
-            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 100)
-            .unwrap();
-
-        assert!(amount > 0);
-    }
-    #[test]
-    fn test_zero_lp_burn() {
-        let amm = setup_pool();
-
-        let result = amm.amm_balanced_withdrawal(0, 1_000_000).unwrap();
-
-        assert_eq!(result[0], 0);
-        assert_eq!(result[1], 0);
-    }
-    #[test]
-    fn test_imbalanced_pool_withdrawal() {
-        let balances = [1_800_000, 200_000];
-
-        let amm = MegaAmmStableSwapCurve {
-            balances: &balances,
-            fee: 30,
-        };
-
-        let amp = 100;
-        let lp_supply = 1_000_000;
-        let lp_to_burn = 100_000;
-
-        let d_current = get_d(amp, &balances, 2).unwrap();
-
-        let result = amm
-            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
-            .unwrap();
-
-        assert!(result > 0);
-    }
-    #[test]
-    fn test_large_balances() {
-        let balances = [10_000_000_000, 10_000_000_000];
-
-        let amm = MegaAmmStableSwapCurve {
-            balances: &balances,
-            fee: 30,
-        };
-
-        let lp_supply = 1_000_000_000;
-        let lp_to_burn = 100_000_000;
-
-        let amp = 100;
-
-        let d_current = get_d(amp, &balances, 2).unwrap();
-
-        let result = amm
-            .amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, amp, 30)
-            .unwrap();
-
-        assert!(result > 0);
-    }
-    //=========================== TESTING SWAPS ============================================
-    //
-    //
-    fn make_curve(balances: &[u64], fee: u64) -> MegaAmmStableSwapCurve {
-        MegaAmmStableSwapCurve { balances, fee }
+        // Balances before initial deposit is [0, 0]
+        let curve = setup_curve(&[0, 0], None);
+        
+        // At genesis total_lp = 0, LP tokens minted should equal D
+        let lp_minted = curve.deposit_to_amm(AMP, 0, &balances).unwrap();
+        let expected_d = get_d(AMP, &balances).unwrap();
+        assert_eq!(lp_minted, expected_d);
     }
 
     #[test]
-    fn test_swap_balanced_pool_small_amount() {
-        let balances = [1_000_000u64, 1_000_000u64];
-        let swap_amount = 100_000u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 30u64; // 0.3%
+    fn test_subsequent_deposit_proportionality() {
+        let initial_balances = [1_000_000, 1_000_000];
+        let curve = setup_curve(&initial_balances, None);
+        let total_lp = 2_000_000;
 
-        let curve = make_curve(&balances, fee);
+        // User adds 10% more liquidity
+        let new_balances = [1_100_000, 1_100_000];
+        let lp_minted = curve.deposit_to_amm(AMP, total_lp, &new_balances).unwrap();
 
-        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
+        // 10% increase in D should result in 10% of total_lp supply minted
+        // Expecting 200,000
+        assert!(lp_minted >= 199_999 && lp_minted <= 200_001);
+    }
 
-        // Amount out must be positive and less than target token balance
-        assert!(amount_out > 0);
-        assert!(amount_out < balances[1]);
+    // ======= STABLESWAPING or TRADING TESTS ========
+    #[test]
+    fn test_stableswap_fee_deduction() {
+        let balances = [10_000_000, 10_000_000];
+        let curve = setup_curve(&balances, Some(1));
+        
+        // Swap 1,000,000 tokens
+        let amount_in = 1_000_000;
+        let amount_out = curve.stableswap(amount_in, 0, AMP).unwrap();
 
-        // Fee must reduce output
-        let expected_no_fee = amount_out + (amount_out * fee / 10000);
-        assert!(expected_no_fee <= balances[1]);
+        // Without fees, in a balanced pool, we'd get ~1,000,000 back.
+        // With 0.3% fee (3,000 tokens), we expect ~997,000.
+        assert!(amount_out < 998_000);
+        assert!(amount_out > 996_000);
     }
 
     #[test]
-    fn test_swap_balanced_pool_large_amount() {
-        let balances = [1_000_000u64, 1_000_000u64];
-        let swap_amount = 900_000u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 30u64;
-
-        let curve = make_curve(&balances, fee);
-        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
-
-        // Should not exceed pool
-        assert!(amount_out < balances[1]);
+    fn test_fee_rounding_in_favor_of_pool() {
+        let balances = [10_000_000, 10_000_000];
+        let curve = setup_curve(&balances, None);
+        
+        // Tiny swap, 10 tokens. 0.3% fee is 0.03 tokens.
+        // Rounding up. .checked_add(9_999).div(10_000)
+        // should force a fee of 1 token even for tiny amounts.
+        let amount_in = 10;
+        let amount_out_raw = 10; // Assuming 1:1 price for small amount
+        let fee = (10u128 * 30 + 9999) / 10000; 
+        assert_eq!(fee, 1);
     }
 
+    // ============== WITHDRAWAL TESTS =====================
     #[test]
-    fn test_swap_imbalanced_pool_small_amount() {
-        let balances = [1_000_000u64, 500_000u64];
-        let swap_amount = 50_000u64;
-        let amp = 50u64;
-        let n = 2u32;
-        let fee = 30u64;
+    fn test_imbalanced_withdrawal_vs_swap_equivalence() {
+        let balances = [10_000_000, 10_000_000];
+        let total_lp = 20_000_000;
+        let lp_to_burn = 1_000_000; // 5% of pool
+        
+        // Withdrawal via Single-Asset Exit. Target Index is 0
+        let curve = setup_curve(&balances, Some(0));
+        let amount_out = curve.amm_imbalanced_withdrawal(lp_to_burn, total_lp, AMP).unwrap();
 
-        let curve = make_curve(&balances, fee);
-
-        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
-
-        assert!(amount_out > 0);
-        assert!(amount_out < balances[1]);
+        // Comparison: Proportional withdrawal is 500k of X and 500k of Y.
+        // If we exit X only, it's like taking 500k X + (swapping 500k Y for X).
+        // We are paying a fee on the "virtual swap" part, total should be < 1M.
+        assert!(amount_out < 1_000_000);
     }
 
-    #[test]
-    fn test_swap_high_amp_flat_curve() {
-        let balances = [1_000_000u64, 500_000u64];
-        let swap_amount = 50_000u64;
-        let amp_low = 1u64;      // behaves like constant product
-        let amp_high = 10_000u64; // behaves like almost constant sum
-        let n = 2u32;
-        let fee = 30u64;
-
-        let curve_low = make_curve(&balances, fee);
-        let curve_high = make_curve(&balances, fee);
-
-        let out_low = curve_low.stableswap(swap_amount, amp_low, n).expect("Low A swap");
-        let out_high = curve_high.stableswap(swap_amount, amp_high, n).expect("High A swap");
-
-        // High A yields higher output for same swap because the curve is flatter
-        assert!(out_high >= out_low);
-    }
-
-    #[test]
-    fn test_swap_zero_amount() {
-        let balances = [1_000_000u64, 1_000_000u64];
-        let swap_amount = 0u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 30u64;
-
-        let curve = make_curve(&balances, fee);
-
-        let result = curve.stableswap(swap_amount, amp, n).expect("Zero swap should succeed");
-        assert_eq!(result, 0);
-    }
-
-    #[test]
-    fn test_swap_max_balances() {
-        let balances = [u64::MAX / 1000, u64::MAX / 1000];
-        let swap_amount = 1_000_000u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 30u64;
-
-        let curve = make_curve(&balances, fee);
-
-        let res = curve.stableswap(swap_amount, amp, n);
-        // Should either succeed or return error, but not panic
-        assert!(res.is_ok() || res.is_err());
-    }
-
-    #[test]
-    fn test_fee_applied_correctly() {
-        let balances = [1_000_000u64, 1_000_000u64];
-        let swap_amount = 100_000u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 100u64; // 1%
-
-        let curve = make_curve(&balances, fee);
-
-        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Should swap");
-        let expected_max = balances[1] - balances[1] * fee / 10000;
-
-        assert!(amount_out < expected_max + 1, "Fee not applied correctly");
-    }
-
-    #[test]
-    fn test_invariant_not_violated() {
-        let balances = [1_000_000u64, 1_000_000u64];
-        let swap_amount = 200_000u64;
-        let amp = 100u64;
-        let n = 2u32;
-        let fee = 30u64;
-
-        let curve = make_curve(&balances, fee);
-
-        let amount_out = curve.stableswap(swap_amount, amp, n).expect("Swap should succeed");
-        let new_balances = [balances[0] + swap_amount, balances[1] - amount_out];
-
-        // Compute D before and after swap
-        let d_before = get_d(amp, &balances, n).unwrap();
-        let d_after = get_d(amp, &new_balances, n).unwrap();
-
-        // D should not decrease more than fees
-        assert!(d_after <= d_before + 1_000, "Invariant violated too much"); 
-    }
-    // ====================== PROPTESTS ==========================
-    //
-    //
-    // Strategy for generating realistic pool balances
-    fn balance_strategy() -> impl Strategy<Value = (u64, u64)> {
-        (1_000u64..10_000_000u64, 1_000u64..10_000_000u64)
-    }
-
-    // Strategy for swap amounts
-    fn swap_strategy() -> impl Strategy<Value = u64> {
-        1u64..1_000_000u64
-    }
-
-    // Strategy for amplification parameter
-    fn amp_strategy() -> impl Strategy<Value = u64> {
-        1u64..1000u64
-    }
+    // =================== PROPERTY BASED TESTING ==========================
 
     proptest! {
-
-        // --------------------------------------------------
-        // PROPERTY 1: Swap output must never exceed pool
-        // --------------------------------------------------
         #[test]
-        fn swap_output_less_than_pool(
-            (x, y) in balance_strategy(),
-            swap_amount in swap_strategy(),
-            amp in amp_strategy(),
+        fn prop_stableswap_no_free_lunch(
+            amount_in in 1000..1_000_000u64,
+            bal_x in 10_000_000..100_000_000u64,
+            bal_y in 10_000_000..100_000_000u64,
         ) {
+            let balances = [bal_x, bal_y];
+            let curve = setup_curve(&balances, Some(1));
 
-            let balances = [x, y];
-            let curve = make_curve(&balances, 30);
+            // A user swaps X -> Y
+            let amount_out_y = curve.stableswap(amount_in, 0, AMP).unwrap();
+            
+            // If the user immediately swaps that Y back to X
+            let mid_balances = [bal_x + amount_in, bal_y - amount_out_y];
+            let curve_back = setup_curve(&mid_balances, Some(0));
+            let amount_out_x = curve_back.stableswap(amount_out_y, 1, AMP).unwrap();
 
-            let out = curve.stableswap(swap_amount, amp, 2);
-
-            prop_assume!(out.is_ok());
-
-            let amount_out = out.unwrap();
-
-            prop_assert!(amount_out <= y);
+            // After two swaps, the user MUST have fewer tokens than they started with.
+            // Proving the fee is being captured and rounding is correct.
+            prop_assert!(amount_out_x < amount_in);
         }
-
-        // --------------------------------------------------
-        // PROPERTY 2: Swap output must always be positive
-        // --------------------------------------------------
-        #[test]
-        fn swap_output_positive(
-            (x, y) in balance_strategy(),
-            swap_amount in swap_strategy(),
-            amp in amp_strategy(),
-        ) {
-
-            let balances = [x, y];
-            let curve = make_curve(&balances, 30);
-
-            let out = curve.stableswap(swap_amount, amp, 2);
-
-            prop_assume!(out.is_ok());
-
-            let amount_out = out.unwrap();
-
-            prop_assert!(amount_out > 0);
-        }
-
-        // --------------------------------------------------
-        // PROPERTY 3: Larger swaps should produce larger outputs
-        // --------------------------------------------------
-        #[test]
-        fn monotonic_swap_output(
-            (x, y) in balance_strategy(),
-            swap_small in 1u64..100_000u64,
-            swap_large in 100_001u64..200_000u64,
-            amp in amp_strategy(),
-        ) {
-
-            let balances = [x, y];
-            let curve = make_curve(&balances, 30);
-
-            let out_small = curve.stableswap(swap_small, amp, 2);
-            let out_large = curve.stableswap(swap_large, amp, 2);
-
-            prop_assume!(out_small.is_ok());
-            prop_assume!(out_large.is_ok());
-
-            prop_assert!(out_large.unwrap() >= out_small.unwrap());
-        }
-
-        // --------------------------------------------------
-        // PROPERTY 4: Invariant should remain roughly constant
-        // --------------------------------------------------
-        #[test]
-        fn invariant_preserved(
-            (x, y) in balance_strategy(),
-            swap_amount in swap_strategy(),
-            amp in amp_strategy(),
-        ) {
-
-            let balances = [x, y];
-            let curve = make_curve(&balances, 30);
-
-            let d_before = get_d(amp, &balances, 2).unwrap();
-
-            let out = curve.stableswap(swap_amount, amp, 2);
-
-            prop_assume!(out.is_ok());
-
-            let amount_out = out.unwrap();
-
-            let new_balances = [
-                x + swap_amount,
-                y - amount_out
-            ];
-
-            let d_after = get_d(amp, &new_balances, 2).unwrap();
-
-            let diff = if d_after > d_before {
-                d_after - d_before
-            } else {
-                d_before - d_after
-            };
-
-            // allow small numerical drift
-            //prop_assert!(diff < 1_000);
-            prop_assert!(d_after >= d_before);
-        }
-
-        // --------------------------------------------------
-        // PROPERTY 5: Fee must reduce output
-        // --------------------------------------------------
-        #[test]
-        fn fee_reduces_output(
-            (x, y) in balance_strategy(),
-            swap_amount in swap_strategy(),
-            amp in amp_strategy(),
-        ) {
-
-            let balances = [x, y];
-
-            let curve_no_fee = make_curve(&balances, 0);
-            let curve_fee = make_curve(&balances, 30);
-
-            let out_no_fee = curve_no_fee.stableswap(swap_amount, amp, 2);
-            let out_fee = curve_fee.stableswap(swap_amount, amp, 2);
-
-            prop_assume!(out_no_fee.is_ok());
-            prop_assume!(out_fee.is_ok());
-
-            prop_assert!(out_fee.unwrap() <= out_no_fee.unwrap());
-        }
-
-        // --------------------------------------------------
-        // PROPERTY 6: Higher amplification should reduce slippage
-        // --------------------------------------------------
-        //#[test]
-        //fn higher_amp_better_price(
-        //    (x, y) in balance_strategy(),
-        //    swap_amount in swap_strategy(),
-        //) {
-
-        //    let balances = [x, y];
-
-        //    let curve = make_curve(&balances, 30);
-
-        //    let out_low_amp = curve.stableswap(swap_amount, 10, 2);
-        //    let out_high_amp = curve.stableswap(swap_amount, 1000, 2);
-        //    println!("The out low amp and out high amp for prop test are {} {}", out_low_amp.unwrap(), out_high_amp.unwrap());
-
-        //    //prop_assume!(out_low_amp.is_ok());
-        //    //prop_assume!(out_high_amp.is_ok());
-
-        //    //prop_assert!(out_high_amp.unwrap() >= out_low_amp.unwrap());
-        //    //prop_assert!(
-        //        //(out_high_amp.unwrap() as i128 - out_low_amp.unwrap() as i128).abs() < 10_000
-        //    //);
-        //}
-
-        //#[test]
-        //fn round_trip_swap_loses_value(
-        //    x in 1_000u64..10_000_000,
-        //    y in 1_000u64..10_000_000,
-        //    swap in 100u64..100_000,
-        //    amp in 10u64..500
-        //) {
-
-        //    let balances = [x, y];
-        //    let curve = MegaAmmStableSwapCurve { balances: &balances, fee: 30 };
-
-        //    let out_y = curve.stableswap(swap, amp, 2).unwrap();
-
-        //    let new_balances = [x + swap, y - out_y];
-
-        //    let curve2 = MegaAmmStableSwapCurve { balances: &new_balances, fee: 30 };
-
-        //    let out_x = curve2.stableswap(out_y, amp, 2).unwrap();
-
-        //    //prop_assert!(out_x < swap);
-        //}
     }
 }

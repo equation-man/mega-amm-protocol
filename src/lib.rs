@@ -22,7 +22,7 @@ use instructions::{
 };
 use config::*;
 
-declare_id!("2qcc8awwigDm897DxTNFwVgKpUpNZ3UbGHxoatBfmgLi");
+declare_id!("rjdfmKCfMe1BHBffDqwhhVjTbkYV9YEVXsiMM9pEVcw");
 
 entrypoint!(process_instructions);
 

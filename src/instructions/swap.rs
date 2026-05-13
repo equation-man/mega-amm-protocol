@@ -110,6 +110,7 @@ impl<'info> TryFrom<(&'info [u8], &'info [AccountView])> for Swap<'info> {
 impl<'info> Swap<'info> {
     pub const DISCRIMINATOR: &'info u8 = &3;
     pub fn process(&mut self) -> ProgramResult {
+        log!("The swap has began");
         let amm_config = Config::load(self.accounts.config)?;
         if amm_config.state() != AmmState::Initialized.into() {
             return Err(MegaAmmProgramError::Unauthorized.into());
@@ -144,13 +145,22 @@ impl<'info> Swap<'info> {
 
         // Swap calculations with newton solver stableswap
         // Balances should be in order, with the last representing token which is being swapped for
+        let balances = [vault_y_amount, vault_x_amount];
         if self.instruction_data.is_x == 1 {
-            // 1.Withdrawing x, hence it is the last element in thelist
-            let balances = [vault_y_amount, vault_x_amount];
-            let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
+            // We're getting y from the pool after adding x.
+            let mut curve = MegaAmmStableSwapCurve {
+                balances: &balances,
+                target_token_idx: Some(1),
+                fee_bps: amm_config.fee().into()
+            };
             // Getting the final amount of token x to send to the user for the swap.
             log!("Calculating the amount out for x swap");
-            let final_amount = curve.stableswap(self.instruction_data.amount, 2, 2).map_err(|_| ProgramError::Custom(2))?;
+            let final_amount = curve.stableswap(
+                self.instruction_data.amount, 0, 100
+            ).map_err(|_| ProgramError::Custom(2))?;
+
+            // Pool balance quard.
+            // if final_amount > 
 
             // Slippage protection.
             log!("The amount out for x swap is {}", final_amount);
@@ -179,13 +189,21 @@ impl<'info> Swap<'info> {
             return Ok(());
         } else {
             // 0. Withdrawing y, hence it is the last element in the list
+            // We've added y we're getting x from the pool
+            // We're getting y from the pool.
             let balances = [vault_x_amount, vault_y_amount];
-            let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: amm_config.fee().into() };
+            let mut curve = MegaAmmStableSwapCurve {
+                balances: &balances,
+                target_token_idx: Some(0),
+                fee_bps: amm_config.fee().into()
+            };
             // Getting final amount of token y to send to the user.
-            let final_amount = curve.stableswap(self.instruction_data.amount, 100, 2).map_err(|_| ProgramError::Custom(2))?;
+            let final_amount = curve.stableswap(
+                self.instruction_data.amount, 1, 100
+            ).map_err(|_| ProgramError::Custom(2))?;
 
             // Slippage protection.
-            log!("The amount out for y swap is {}", final_amount);
+            log!("The amount of y swap from pool to user is {}", final_amount);
             if final_amount < self.instruction_data.min {
                 log!("Slippage protection");
                 return Err(MegaAmmProgramError::SlippageExceeded.into());

@@ -30,7 +30,7 @@ use spl_token::solana_program::program_option::COption;
 use crate::common::context::{AmmTestContext};
 
 pub fn setup_initialized_amm() -> AmmTestContext {
-    let program_id = solana_sdk::pubkey!("2qcc8awwigDm897DxTNFwVgKpUpNZ3UbGHxoatBfmgLi");
+    let program_id = solana_sdk::pubkey!("rjdfmKCfMe1BHBffDqwhhVjTbkYV9YEVXsiMM9pEVcw");
     let bytes = include_bytes!("../../target/deploy/mega_amm_protocol.so");
 
     let rent = solana_sdk::sysvar::rent::Rent::default();
@@ -58,11 +58,13 @@ pub fn setup_initialized_amm() -> AmmTestContext {
     );
 
     let authority = Pubkey::new_unique();
+    // Stable swaps fee are between 1 bps and 4bps
+    let fee = 2u16;
     let mut instruction_data = vec![0u8];
     // Seed
     instruction_data.extend_from_slice(&seed.to_le_bytes());
     // Fee
-    instruction_data.extend_from_slice(&10u16.to_le_bytes());
+    instruction_data.extend_from_slice(&fee.to_le_bytes());
     // mintx_x
     instruction_data.extend_from_slice(mint_x.as_ref());
     // mint_y
@@ -108,7 +110,6 @@ pub fn setup_initialized_amm() -> AmmTestContext {
 
     let tx_init = svm.send_transaction(tx);
     //println!("The amm initialization is {:#?}", tx_init);
-    let fee = 10;
 
     AmmTestContext {
         svm,

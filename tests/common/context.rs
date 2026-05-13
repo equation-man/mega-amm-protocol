@@ -20,7 +20,7 @@ pub struct AmmTestContext {
     pub vault_y_ata: Pubkey,
     pub config_pda: Pubkey,
     pub lp_mint_pda: Pubkey,
-    pub fee: u8,
+    pub fee: u16,
 }
 
 pub struct DepositTestContext {

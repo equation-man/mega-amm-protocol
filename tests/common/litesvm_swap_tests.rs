@@ -26,32 +26,29 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     println!("================ NORMAL SWAP TEST ================");
     println!("Perfoming a normal token swap");
 
-    let user = &ctx.initializer; // initializer is acting as user
+    let user = &ctx.initializer; // initializer.
+    // User wallet performing the swap.
+    let target_wallet = Keypair::new();
     svm.airdrop(&user.pubkey(), 1_000_000_000_000);
+    svm.airdrop(&target_wallet.pubkey(), 1_000_000_000_000);
     let program_id = ctx.program_id;
 
     // Create User ATAs
-    let user_x_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_x,
-        &user.pubkey(),
+    let wallet_x_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_x, &target_wallet.pubkey(),
     );
 
-    let user_y_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_y,
-        &user.pubkey(),
+    let wallet_y_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_y, &target_wallet.pubkey(),
     );
 
-    // Mint tokens to user so they can swap
+    // Mint x tokens to target wallet so they can swap
     mint_tokens(
-        svm,
-        user,
-        &ctx.mint_x,
-        &user_x_ata,
-        1_000_000,
+        svm, user, &ctx.mint_x, &wallet_x_ata, 1_000_000,
+    );
+    // Mint y tokens to target wallet for swapping.
+    mint_tokens(
+        svm, user, &ctx.mint_y, &wallet_y_ata, 1_000_000,
     );
 
     // Build Swap Instruction Data
@@ -74,24 +71,25 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     println!("The balance in the vault y before swap is {}", y_vault_before_swap);
     println!("================================================");
     // token balances before swaps
-    let x_before_swap = get_token_balance(svm, &user_x_ata);
-    let y_before_swap = get_token_balance(svm, &user_y_ata);
+    let x_before_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_before_swap = get_token_balance(svm, &wallet_y_ata);
 
     println!("User ata balance for X before swap: {}", x_before_swap);
     println!("User ata balance for Y before swap: {}", y_before_swap);
-    println!("The amount of token X to be swapped for y: {}", amount);
-    println!("The fee charge is {} basis points", ctx.fee);
+    println!("The amount of tokens to be swapped: {}", amount);
+    println!("Swap mode (1 for x->y, 0 for y->x): {}", target_token); 
+    println!("Fee in bps on swap is: {}", ctx.fee);
     println!("================================================");
 
     // Build Instruction
     let accounts = vec![
-        AccountMeta::new(user.pubkey(), true),
+        AccountMeta::new(target_wallet.pubkey(), true),
 
         AccountMeta::new(ctx.vault_x_ata, false),
         AccountMeta::new(ctx.vault_y_ata, false),
 
-        AccountMeta::new(user_x_ata, false),
-        AccountMeta::new(user_y_ata, false),
+        AccountMeta::new(wallet_x_ata, false),
+        AccountMeta::new(wallet_y_ata, false),
 
         AccountMeta::new(ctx.config_pda, false),
         AccountMeta::new(ctx.lp_mint_pda, false),
@@ -100,14 +98,12 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     ];
 
     let instruction = Instruction::new_with_bytes(
-        program_id,
-        &data,
-        accounts,
+        program_id, &data, accounts,
     );
 
     let tx = Transaction::new(
-        &[&user],
-        Message::new(&[instruction], Some(&user.pubkey())),
+        &[&target_wallet],
+        Message::new(&[instruction], Some(&target_wallet.pubkey())),
         svm.latest_blockhash(),
     );
 
@@ -116,8 +112,8 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     //println!("Swap result: {:#?}", result);
 
     // Validate balances from the user's wallet
-    let x_after_swap = get_token_balance(svm, &user_x_ata);
-    let y_after_swap = get_token_balance(svm, &user_y_ata);
+    let x_after_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_after_swap = get_token_balance(svm, &wallet_y_ata);
 
     // Token balance from the pool
     let x_vault_after_swap = get_token_balance(svm, &ctx.vault_x_ata);
@@ -125,7 +121,7 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
 
 
     println!("User ata balance for X after swap: {}", x_after_swap);
-    println!("User ata balance for Y after swap(minus swap fees): {}", y_after_swap);
+    println!("User ata balance for Y after swap: {}", y_after_swap);
     println!("=============================================================");
     println!("The balance in the vault x after swap is {}", x_vault_after_swap);
     println!("The balance in the vault y after swap is {}", y_vault_after_swap);
@@ -153,31 +149,27 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
     //svm.warp_to_slot(current_slot + 1); // Warps the clock to specified slot
 
     let user = &ctx.initializer;
+    let target_wallet = Keypair::new();
     svm.airdrop(&user.pubkey(), 1_000_000_000_000);
+    svm.airdrop(&target_wallet.pubkey(), 1_000_000_000);
     let program_id = ctx.program_id;
 
     // Create User ATAs for storing x and y tokens
-    let user_x_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_x,
-        &user.pubkey(),
+    let wallet_x_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_x, &target_wallet.pubkey(),
     );
 
-    let user_y_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_y,
-        &user.pubkey(),
+    let wallet_y_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_y, &target_wallet.pubkey(),
     );
 
-    // Mint tokens to user the token to swap, here, x
+    // Mint x tokens to target wallet for swap.
     mint_tokens(
-        svm,
-        user,
-        &ctx.mint_x,
-        &user_x_ata,
-        1_000_000,
+        svm, user, &ctx.mint_x, &wallet_x_ata, 1_000_000,
+    );
+    // Mint y tokens to target wallet for swap.
+    mint_tokens(
+        svm, user, &ctx.mint_y, &wallet_y_ata, 1_000_000,
     );
 
     // Build Swap Instruction with zero amount
@@ -200,24 +192,25 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
     println!("The balance in the vault y before zero swap is {}", y_vault_before_swap);
     println!("================================================");
     // token balances before swaps
-    let x_before_swap = get_token_balance(svm, &user_x_ata);
-    let y_before_swap = get_token_balance(svm, &user_y_ata);
+    let x_before_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_before_swap = get_token_balance(svm, &wallet_y_ata);
 
     println!("User ata balance for X before zero swap: {}", x_before_swap);
     println!("User ata balance for Y before zero swap: {}", y_before_swap);
-    println!("The amount of token X to be swapped for y: {}", amount);
-    println!("The fee charge is {} basis points", ctx.fee);
+    println!("The amount of tokens to be swapped: {}", amount);
+    println!("Swap mode (1 for x->y, 0 for y->x): {}", target_token);
+    println!("Fee in bps on swap is: {}", ctx.fee);
     println!("================================================");
 
     // Building the Instruction
     let accounts = vec![
-        AccountMeta::new(user.pubkey(), true),
+        AccountMeta::new(target_wallet.pubkey(), true),
 
         AccountMeta::new(ctx.vault_x_ata, false),
         AccountMeta::new(ctx.vault_y_ata, false),
 
-        AccountMeta::new(user_x_ata, false),
-        AccountMeta::new(user_y_ata, false),
+        AccountMeta::new(wallet_x_ata, false),
+        AccountMeta::new(wallet_y_ata, false),
 
         AccountMeta::new(ctx.config_pda, false),
         AccountMeta::new(ctx.lp_mint_pda, false),
@@ -226,14 +219,12 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
     ];
 
     let instruction = Instruction::new_with_bytes(
-        program_id,
-        &data,
-        accounts,
+        program_id, &data, accounts,
     );
 
     let tx = Transaction::new(
-        &[&user],
-        Message::new(&[instruction], Some(&user.pubkey())),
+        &[&target_wallet],
+        Message::new(&[instruction], Some(&target_wallet.pubkey())),
         svm.latest_blockhash(),
     );
 
@@ -243,15 +234,15 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
     //println!("Swap result for zero amount: {:#?}", result);
 
     // Validate balances from the user's wallet
-    let x_after_swap = get_token_balance(svm, &user_x_ata);
-    let y_after_swap = get_token_balance(svm, &user_y_ata);
+    let x_after_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_after_swap = get_token_balance(svm, &wallet_y_ata);
 
     // Token balance from the pool
     let x_vault_after_swap = get_token_balance(svm, &ctx.vault_x_ata);
     let y_vault_after_swap = get_token_balance(svm, &ctx.vault_y_ata);
 
     println!("User ata balance for X after zero swap: {}", x_after_swap);
-    println!("User ata balance for Y after zero swap(minus swap fees): {}", y_after_swap);
+    println!("User ata balance for Y after zero swap: {}", y_after_swap);
     println!("=============================================================");
     println!("The balance in the vault x after zero swap is {}", x_vault_after_swap);
     println!("The balance in the vault y after zero swap is {}", y_vault_after_swap);
@@ -275,31 +266,27 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
     //svm.warp_to_slot(current_slot + 1); // Warps the clock to specified slot
 
     let user = &ctx.initializer;
+    let target_wallet = Keypair::new();
     svm.airdrop(&user.pubkey(), 1_000_000_000_000);
+    svm.airdrop(&target_wallet.pubkey(), 1_000_000_000);
     let program_id = ctx.program_id;
 
     // Create User ATAs for storing x and y tokens
-    let user_x_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_x,
-        &user.pubkey(),
+    let wallet_x_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_x, &target_wallet.pubkey(),
     );
 
-    let user_y_ata = create_ata(
-        svm,
-        &user,
-        &ctx.mint_y,
-        &user.pubkey(),
+    let wallet_y_ata = create_ata(
+        svm, &target_wallet, &ctx.mint_y, &target_wallet.pubkey(),
     );
 
     // Mint tokens to user the token to swap, here, x
     mint_tokens(
-        svm, user, &ctx.mint_x, &user_x_ata, 200_000_000,
+        svm, user, &ctx.mint_x, &wallet_x_ata, 200_000_000,
     );
     // Mint tokens y to the user for swap testing here.
     mint_tokens(
-        svm, user, &ctx.mint_y, &user_y_ata, 100_000_000
+        svm, user, &ctx.mint_y, &wallet_y_ata, 100_000_000
     );
 
     // Build Swap Instruction with zero amount
@@ -322,24 +309,25 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
     println!("The balance in the vault y before slippage swap is {}", y_vault_before_swap);
     println!("================================================");
     // token balances before swaps
-    let x_before_swap = get_token_balance(svm, &user_x_ata);
-    let y_before_swap = get_token_balance(svm, &user_y_ata);
+    let x_before_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_before_swap = get_token_balance(svm, &wallet_y_ata);
 
     println!("User ata balance for X before slippage swap: {}", x_before_swap);
     println!("User ata balance for Y before slippage swap: {}", y_before_swap);
-    println!("The amount of token X to be slippage swapped for y: {}", amount);
-    println!("The fee charge is {} basis points", ctx.fee);
+    println!("The amount of token to be swapped: {}", amount);
+    println!("Swap mode (1 for x->y, 0 for y->x): {}", target_token);
+    println!("Fee in bps on swap is: {}", ctx.fee);
     println!("================================================");
 
     // Building the Instruction
     let accounts = vec![
-        AccountMeta::new(user.pubkey(), true),
+        AccountMeta::new(target_wallet.pubkey(), true),
 
         AccountMeta::new(ctx.vault_x_ata, false),
         AccountMeta::new(ctx.vault_y_ata, false),
 
-        AccountMeta::new(user_x_ata, false),
-        AccountMeta::new(user_y_ata, false),
+        AccountMeta::new(wallet_x_ata, false),
+        AccountMeta::new(wallet_y_ata, false),
 
         AccountMeta::new(ctx.config_pda, false),
         AccountMeta::new(ctx.lp_mint_pda, false),
@@ -348,14 +336,12 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
     ];
 
     let instruction = Instruction::new_with_bytes(
-        program_id,
-        &data,
-        accounts,
+        program_id, &data, accounts,
     );
 
     let tx = Transaction::new(
-        &[&user],
-        Message::new(&[instruction], Some(&user.pubkey())),
+        &[&target_wallet],
+        Message::new(&[instruction], Some(&target_wallet.pubkey())),
         svm.latest_blockhash(),
     );
 
@@ -365,15 +351,15 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
     println!("Slippage test result is: {:#?}", result);
     
     // Validate balances from the user's wallet
-    let x_after_swap = get_token_balance(svm, &user_x_ata);
-    let y_after_swap = get_token_balance(svm, &user_y_ata);
+    let x_after_swap = get_token_balance(svm, &wallet_x_ata);
+    let y_after_swap = get_token_balance(svm, &wallet_y_ata);
 
     // Token balance from the pool
     let x_vault_after_swap = get_token_balance(svm, &ctx.vault_x_ata);
     let y_vault_after_swap = get_token_balance(svm, &ctx.vault_y_ata);
 
     println!("User ata balance for X after slippage swap: {}", x_after_swap);
-    println!("User ata balance for Y after slippage swap(minus swap fees): {}", y_after_swap);
+    println!("User ata balance for Y after slippage swap: {}", y_after_swap);
     println!("=============================================================");
     println!("The balance in the vault x after slippage swap is {}", x_vault_after_swap);
     println!("The balance in the vault y after slippage swap is {}", y_vault_after_swap);

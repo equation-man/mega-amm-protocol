@@ -149,12 +149,14 @@ impl<'info> Withdraw<'info> {
         let signer_seeds = [Signer::from(&config_signer_seeds)];
 
         let balances = [vault_x_amount, vault_y_amount];
-        let mut curve = MegaAmmStableSwapCurve { balances: &balances, fee: 0};
         // Transfer token amounts returned, list of amounts of tokens to move.
         if self.instruction_data.withdraw_mode == 0 {
             // Balanced withdrawal. Specifying the lps to burn comes from the frontend.
             // This is a slice, arranged as it was supplied to the curve
             // i.e for above, x is at the 1st index then y, these are amounts to send
+            let mut curve = MegaAmmStableSwapCurve {
+                balances: &balances, target_token_idx: None, fee_bps: 0
+            };
             let new_balances = curve.amm_balanced_withdrawal(self.instruction_data.lp_to_burn, lp_supply)
                 .map_err(|_| ProgramError::Custom(2))?;
 
@@ -185,16 +187,21 @@ impl<'info> Withdraw<'info> {
             )?;
             Ok(())
         } else {
-            // Calculating d_current and the lps to burn.
-            let d_current = get_d(100, curve.balances, 2).map_err(|_| ProgramError::Custom(0))?;
+            // Imbalanced withdrawal acts as a virtual swap.
             // Imbalanced withdrawal of x from the pool. x has changed
+            let d_current = get_d(100, &[vault_x_amount, vault_y_amount]).map_err(|_| ProgramError::Custom(1))?;
             if self.instruction_data.amount_of_x > 0 && self.instruction_data.amount_of_y == 0 {
+                let mut curve = MegaAmmStableSwapCurve {
+                    balances: &balances, target_token_idx: Some(0), fee_bps: amm_config.fee().into()
+                };
+
                 let new_x_amount = vault_x_amount.checked_sub(self.instruction_data.amount_of_x).ok_or(ProgramError::Custom(5))?;
-                let d_new = get_d(100, &[new_x_amount, vault_y_amount], 2).map_err(|_| ProgramError::Custom(1))?;
+                let d_new = get_d(100, &[new_x_amount, vault_y_amount]).map_err(|_| ProgramError::Custom(1))?;
                 let spread = d_current.checked_sub(d_new).ok_or(ProgramError::Custom(2))?;
                 let lp_to_burn = lp_supply.checked_mul(spread).ok_or(ProgramError::Custom(3))?.checked_div(d_current).ok_or(ProgramError::Custom(4))?;
                 // Specifying lps to burn is calculated by the smart contract.
-                let new_balance = curve.amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, 100, amm_config.fee().into())
+                // Fee has already been applied
+                let new_balance = curve.amm_imbalanced_withdrawal(lp_to_burn, lp_supply, 100)
                     .map_err(|_| ProgramError::Custom(2))?;
                 TokenAccount::transfer_spl_tokens(
                     self.accounts.vault_x,
@@ -216,12 +223,16 @@ impl<'info> Withdraw<'info> {
 
             // Imbalanced withdrawal of y from the pool. y has changed
             if self.instruction_data.amount_of_y > 0 && self.instruction_data.amount_of_x == 0 {
+                let mut curve = MegaAmmStableSwapCurve {
+                    balances: &balances, target_token_idx: Some(1), fee_bps: amm_config.fee().into()
+                };
+
                 let new_y_balance = vault_y_amount.checked_sub(self.instruction_data.amount_of_y).ok_or(ProgramError::Custom(5))?;
-                let d_new = get_d(100, &[vault_x_amount, new_y_balance], 2).map_err(|_| ProgramError::Custom(1))?;
+                let d_new = get_d(100, &[vault_x_amount, new_y_balance]).map_err(|_| ProgramError::Custom(1))?;
                 let spread = d_current.checked_sub(d_new).ok_or(ProgramError::Custom(2))?;
                 let lp_to_burn = lp_supply.checked_mul(spread).ok_or(ProgramError::Custom(3))?.checked_div(d_current).ok_or(ProgramError::Custom(4))?;
                 // Specifying lps to burn is calculated by the smart contract.
-                let new_balance = curve.amm_imbalanced_withdrawal(lp_to_burn, lp_supply, d_current, 100, amm_config.fee().into())
+                let new_balance = curve.amm_imbalanced_withdrawal(lp_to_burn, lp_supply, 100)
                     .map_err(|_| ProgramError::Custom(2))?;
                 TokenAccount::transfer_spl_tokens(
                     self.accounts.vault_y,
