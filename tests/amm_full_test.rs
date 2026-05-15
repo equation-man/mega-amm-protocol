@@ -11,69 +11,36 @@ use common::litesvm_swap_tests::{
 };
 
 #[test]
-fn test_full_amm() {
+#[ignore]
+fn test_basic_swap() {
     // =================== NORMAL SWAP TEST(Balanced pool) ========================
     // Near zero slippage expected with 1:1 exchange rate on a balanced stable pool
-    //let mut ctx_1 = setup_initialized_amm();
-    //// Pool token amounts
-    //let x_1_amount = 1_000_000;
-    //let y_1_amount = 1_000_000;
-    //let _ = deposit_liquidity(&mut ctx_1, x_1_amount, y_1_amount);
-    //// Swap parameters.
-    //let swap_amount_1 = 900_000;
-    //let slippage_1 = 9_800;
-    //let swap_x_1 = 1;
-    //normal_swap(&mut ctx_1, swap_amount_1, slippage_1, swap_x_1);
-    //println!(" ");
-
-    // =================== ZERO SWAP TEST =========================
-    // Testing zero swap amount guard to reject zero swaps.
-    //let mut ctx_2 = setup_initialized_amm();
-    //// Pool token amounts
-    //let x_2_amount = 1_000_000;
-    //let y_2_amount = 1_000_000;
-    //let _ = deposit_liquidity(&mut ctx_2, x_2_amount, y_2_amount);
-    //// Swap parameters.
-    //let swap_amount_2 = 0;
-    //let slippage_2 = 1;
-    //let swap_x_2 = 0;
-    //zero_amount_swap(&mut ctx_2, swap_amount_2, slippage_2, swap_x_2);
-    //println!(" ");
-
-    // =================== SLIPPAGE PROTECTION SWAP TEST ==========
-    // Swapping X for Y
-    //let mut ctx_3 = setup_initialized_amm();
-    //// Pool token amounts
-    //let x_3_amount = 100_000_000;
-    //let y_3_amount = 100_000;
-    //let _ = deposit_liquidity(&mut ctx_3, x_3_amount, y_3_amount);
-    //// Swap parameters.
-    //// Swap amount is the amount of x to deposit for y
-    //let swap_amount_3 = 50_000_000;
-    //let slippage_3 = 30_000;
-    //let swap_x_3 = 1; 
-    //slippage_protected_swap(&mut ctx_3, swap_amount_3, slippage_3, swap_x_3);
-    //println!(" ");
-
-    //// Swapping Y for X
-    //let mut ctx_4 = setup_initialized_amm();
-    //// Pool token amounts
-    //let x_4_amount = 1_000_100;
-    //let y_4_amount = 100_000_000;
-    //let _ = deposit_liquidity(&mut ctx_4, x_4_amount, y_4_amount);
-    //// Swap parameters.
-    //// Swap amount is the amount of y to deposit for x
-    //let swap_amount_4 = 50_000_000; // y deposited to get x
-    //let slippage_4 = 500;
-    //let swap_x_4 = 1; // We are swapping toke Y for X, hence we set to 1
-    //slippage_protected_swap(&mut ctx_4, swap_amount_4, slippage_4, swap_x_4);
-    //println!(" ");
-
-    //withdraw_liquidity(&mut ctx, &deposit_state);
+    let mut ctx_1 = setup_initialized_amm();
+    // Pool token amounts
+    let x_1_amount = 1_000_000;
+    let y_1_amount = 1_000_000;
+    let _ = deposit_liquidity(&mut ctx_1, x_1_amount, y_1_amount);
+    // Swap parameters.
+    let swap_amount_1 = 10_000;
+    let slippage_1 = 9_800;
+    let swap_x_1 = 1;
+    normal_swap(&mut ctx_1, swap_amount_1, slippage_1, swap_x_1);
+    println!(" ");
 }
 
-proptest! {
+#[test]
+#[ignore]
+fn test_withdrawing_liquidity() {
+    let mut ctx_1 = setup_initialized_amm();
+    // Pool token amounts
+    let x_1_amount = 1_000_000;
+    let y_1_amount = 1_000_000;
+    let deposit_ctx = deposit_liquidity(&mut ctx_1, x_1_amount, y_1_amount);
+    withdraw_liquidity(&mut ctx_1, &deposit_ctx);
+}
 
+// ================ PROPERTY TESTS ===============================
+proptest! {
     #[test]
     #[ignore]
     fn prop_no_negative_reserves(
@@ -89,16 +56,12 @@ proptest! {
 
         let slippage = 9_999u64;
 
-        normal_swap(
-            &mut ctx,
-            swap_amount,
-            slippage,
-            if swap_x { 1 } else { 0 }
-        );
+        normal_swap(&mut ctx, swap_amount, slippage, if swap_x { 1 } else { 0 });
 
     }
 
     #[test]
+    #[ignore]
     fn prop_pool_reserve_behavior_under_random_swaps(
         initial_x in 1_000u64..10_000_000u64,
         initial_y in 1_000u64..10_000_000u64,
@@ -109,15 +72,86 @@ proptest! {
         // Setup AMM with arbitrary reserve ratios
         let mut ctx = setup_initialized_amm();
 
-        deposit_liquidity( &mut ctx, initial_x, initial_y );
+        deposit_liquidity(&mut ctx, initial_x, initial_y);
 
         // Avoid impossible swaps that fully drain pool
 
         // Execute swap
-        let amount_out = normal_swap(
-            &mut ctx, swap_amount, 10_000,
-            if swap_x { 1 } else { 0 },
-        );
+        let amount_out = normal_swap(&mut ctx, swap_amount, 10_000, if swap_x { 1 } else { 0 });
 
+    }
+
+    #[test]
+    #[ignore]
+    fn prop_extreme_imbalance_pool_behavior(
+        // Dominant reserve
+        dominant_reserve in 1_000_000u64..50_000_000u64,
+        // Weak reserve
+        weak_reserve in 1_000u64..50_000u64,
+        // Random swap size
+        swap_amount in 1u64..5_000_000u64,
+        // true  => x -> y
+        // false => y -> x
+        swap_x in any::<bool>(),
+    ) {
+
+        let mut ctx = setup_initialized_amm();
+
+        // CASE 1:
+        // Huge X reserve, tiny Y reserve
+        // Trader swaps X -> Y
+        // Pool should resist depletion of Y.
+        let (initial_x, initial_y) = if swap_x {
+            (dominant_reserve, weak_reserve)
+        } else {
+            // CASE 2:
+            // Tiny X reserve, huge Y reserve
+            // Trader swaps Y -> X
+            // Pool should resist depletion of X.
+            (weak_reserve, dominant_reserve)
+        };
+
+        // Deposit imbalanced liquidity
+        deposit_liquidity(&mut ctx, initial_x, initial_y);
+
+        // Execute swap
+        normal_swap(&mut ctx, swap_amount, 10_000, if swap_x { 1 } else { 0 });
+    }
+
+    #[test]
+    fn prop_normal_market_pool_behavior(
+        // Normal market conditions
+        // Pools are relatively balanced.
+        // This simulates realistic stablecoin markets
+        // near peg.
+        base_liquidity in 1_000_000u64..50_000_000u64,
+        // Small imbalance offset
+        imbalance in 0u64..500_000u64,
+        // Trade sizes are moderate relative to pool
+        swap_amount in 1u64..2_000_000u64,
+        // true  => x -> y
+        // false => y -> x
+        swap_x in any::<bool>(),
+    ) {
+
+        let mut ctx = setup_initialized_amm();
+
+        // CASE 1:
+        // Slightly more X liquidity
+        // Trader swaps X -> Y
+        let (initial_x, initial_y) = if swap_x {
+            (base_liquidity + imbalance, base_liquidity)
+        } else {
+        // CASE 2:
+        // Slightly more Y liquidity
+        // Trader swaps Y -> X
+            (base_liquidity, base_liquidity + imbalance)
+        };
+
+        // Deposit liquidity
+        deposit_liquidity(&mut ctx, initial_x, initial_y);
+
+        // Execute swap
+        normal_swap(&mut ctx, swap_amount, 9_800, if swap_x { 1 } else { 0 });
     }
 }

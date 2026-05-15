@@ -10,7 +10,6 @@ use crate::helpers::utils::{
     SignerAccount, MintInterface, TokenInterface, MintAccount,
     TokenAccount, ProgramAccount, AssociatedTokenAccount,
 };
-use constant_product_curve::ConstantProduct;
 use crate::helpers::math_procs::curve_ops::MegaAmmStableSwapCurve;
 use crate::helpers::math_procs::numerical_ops::get_d;
 use crate::config::{Config, AmmState};

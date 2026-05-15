@@ -11,9 +11,7 @@ use crate::helpers::errors::MegaAmmProgramError;
 use pinocchio::sysvars::clock::Clock;
 use crate::config::{Config, AmmState};
 use crate::helpers::math_procs::curve_ops::MegaAmmStableSwapCurve;
-use constant_product_curve::{ConstantProduct, LiquidityPair};
 use solana_address;
-use pinocchio_log::log;
 
 pub struct SwapAccounts<'info> {
     pub user: &'info AccountView,
@@ -110,7 +108,6 @@ impl<'info> TryFrom<(&'info [u8], &'info [AccountView])> for Swap<'info> {
 impl<'info> Swap<'info> {
     pub const DISCRIMINATOR: &'info u8 = &3;
     pub fn process(&mut self) -> ProgramResult {
-        log!("The swap has began");
         let amm_config = Config::load(self.accounts.config)?;
         if amm_config.state() != AmmState::Initialized.into() {
             return Err(MegaAmmProgramError::Unauthorized.into());
@@ -154,7 +151,6 @@ impl<'info> Swap<'info> {
                 fee_bps: amm_config.fee().into()
             };
             // Getting the final amount of token x to send to the user for the swap.
-            log!("Calculating the amount out for x swap");
             let final_amount = curve.stableswap(
                 self.instruction_data.amount, 0, 100
             ).map_err(|_| ProgramError::Custom(2))?;
@@ -163,9 +159,7 @@ impl<'info> Swap<'info> {
             // if final_amount > 
 
             // Slippage protection.
-            log!("The amount out for x swap is {}", final_amount);
             if final_amount < self.instruction_data.min {
-                log!("Slippage protection");
                 return Err(MegaAmmProgramError::SlippageExceeded.into());
             }
 
@@ -203,9 +197,7 @@ impl<'info> Swap<'info> {
             ).map_err(|_| ProgramError::Custom(2))?;
 
             // Slippage protection.
-            log!("The amount of y swap from pool to user is {}", final_amount);
             if final_amount < self.instruction_data.min {
-                log!("Slippage protection");
                 return Err(MegaAmmProgramError::SlippageExceeded.into());
             }
 

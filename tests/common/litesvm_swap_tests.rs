@@ -44,11 +44,11 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
 
     // Mint x tokens to target wallet so they can swap
     mint_tokens(
-        svm, user, &ctx.mint_x, &wallet_x_ata, 1_000_000,
+        svm, user, &ctx.mint_x, &wallet_x_ata, 1000_000_000,
     );
     // Mint y tokens to target wallet for swapping.
     mint_tokens(
-        svm, user, &ctx.mint_y, &wallet_y_ata, 1_000_000,
+        svm, user, &ctx.mint_y, &wallet_y_ata, 1000_000_000,
     );
 
     // Build Swap Instruction Data
@@ -67,19 +67,19 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     // Vault balances before swap.
     let x_vault_before_swap = get_token_balance(svm, &ctx.vault_x_ata);
     let y_vault_before_swap = get_token_balance(svm, &ctx.vault_y_ata);
-    println!("The balance in the vault x before swap is {}", x_vault_before_swap);
-    println!("The balance in the vault y before swap is {}", y_vault_before_swap);
-    println!("================================================");
+    println!("Pool vault X: Balance in the vault x before swap is {}", x_vault_before_swap);
+    println!("Pool vault Y: Balance in the vault y before swap is {}", y_vault_before_swap);
     // token balances before swaps
     let x_before_swap = get_token_balance(svm, &wallet_x_ata);
     let y_before_swap = get_token_balance(svm, &wallet_y_ata);
 
-    println!("User ata balance for X before swap: {}", x_before_swap);
-    println!("User ata balance for Y before swap: {}", y_before_swap);
+    println!("Trader wallet(X Ata): Ata balance for X before swap: {}", x_before_swap);
+    println!("Trader wallet(Y Ata): Ata balance for Y before swap: {}", y_before_swap);
+    println!("----------------------------------------------");
     println!("The amount of tokens to be swapped: {}", amount);
     println!("Swap mode (1 for x->y, 0 for y->x): {}", target_token); 
     println!("Fee in bps on swap is: {}", ctx.fee);
-    println!("================================================");
+    println!("----------------------------------------------");
 
     // Build Instruction
     let accounts = vec![
@@ -120,12 +120,12 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
     let y_vault_after_swap = get_token_balance(svm, &ctx.vault_y_ata);
 
 
-    println!("User ata balance for X after swap: {}", x_after_swap);
-    println!("User ata balance for Y after swap: {}", y_after_swap);
-    println!("=============================================================");
-    println!("The balance in the vault x after swap is {}", x_vault_after_swap);
-    println!("The balance in the vault y after swap is {}", y_vault_after_swap);
-    println!("=============================================================");
+    println!("Trader Wallet(X Ata): Balance for X after swap: {}", x_after_swap);
+    println!("Trader Wallet(Y Ata): Balance for Y after swap: {}", y_after_swap);
+    println!("Pool Vault X: Balance in the vault x after swap is {}", x_vault_after_swap);
+    println!("Pool Vault Y: Balance in the vault y after swap is {}", y_vault_after_swap);
+    println!("=====================-- END OF TEST --==================");
+    println!(" ");
 
     // Return some amount of the other token that should be greater than 0.
     // Here we are swapping x, so y should be greater than 0.

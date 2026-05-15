@@ -710,11 +710,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
-name = "constant-product-curve"
-version = "0.1.0"
-source = "git+https://github.com/deanmlittle/constant-product-curve#2a723a0ff5ad522f657f80c053c2bb290da28b70"
-
-[[package]]
 name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1103,12 +1098,6 @@ dependencies = [
  "libc",
  "windows-sys",
 ]
-
-[[package]]
-name = "ethnum"
-version = "1.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca81e6b4777c89fd810c25a4be2b1bd93ea034fbe58e6a75216a34c6b82c539b"
 
 [[package]]
 name = "fastrand"
@@ -1683,8 +1672,6 @@ name = "mega-amm-protocol"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "constant-product-curve",
- "ethnum",
  "litesvm",
  "litesvm-token",
  "mollusk-svm",
