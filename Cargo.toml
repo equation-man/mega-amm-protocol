@@ -12,11 +12,19 @@ pinocchio-system = "0.5.0"
 pinocchio-token = "0.5.0"
 pinocchio-token-2022 = "0.2.0"
 solana-address = { version = "2.0.0", features = ["curve25519"] }
+shank = { version = "0.4", optional = true } # Not compiled unless feature explicitly enables it
+borsh = { version = "1.0.0", optional = true, features = ["derive"] }
+solana-program = { version = "3.0.0", optional = true }
+
+[build-dependencies]
+shank-cli = "0.4"
 
 [features]
-default = ["std"]
+default = [] # std feature enabled by default
 std = []
 no-entrypoint = []
+# Defining idl feature
+idl=["dep:shank", "dep:borsh", "dep:solana-program", "no-entrypoint"]
 
 [lib]
 crate-type = ["lib", "cdylib"]
@@ -25,10 +33,6 @@ crate-type = ["lib", "cdylib"]
 bincode = "1.3.3"
 litesvm = "0.9.1"
 litesvm-token = "0.9.1"
-mollusk-svm = "0.10.1"
-mollusk-svm-bencher = "0.10.1"
-mollusk-svm-programs-memo = "0.10.1"
-mollusk-svm-programs-token = "0.10.1"
 proptest = "1.10.0"
 solana-account = "3.3.0"
 solana-feature-set = "2.2.5"

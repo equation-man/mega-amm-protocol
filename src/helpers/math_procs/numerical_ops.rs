@@ -7,8 +7,7 @@ pub const MAX_TOKENS: usize = 2;
 
 // Fee calculator function. Uses ceiling division
 pub fn apply_swap_fee(
-    amount_out_raw: u64,
-    fee_bps: u64, // e.g., 30 for 0.3%
+    amount_out_raw: u64, fee_bps: u64, // e.g., 30 for 0.3%
 ) -> Result<u64, &'static str> {
     if fee_bps == 0 {
         return Ok(amount_out_raw);
