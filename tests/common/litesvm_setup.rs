@@ -30,7 +30,7 @@ use spl_token::solana_program::program_option::COption;
 use crate::common::context::{AmmTestContext};
 
 pub fn setup_initialized_amm() -> AmmTestContext {
-    let program_id = solana_sdk::pubkey!("rjdfmKCfMe1BHBffDqwhhVjTbkYV9YEVXsiMM9pEVcw");
+    let program_id = solana_sdk::pubkey!("BHXSSPSY1DqDbLGUhf33bTRd8jxhNvGatqGNR14Huxwc");
     let bytes = include_bytes!("../../target/deploy/mega_amm_protocol.so");
 
     let rent = solana_sdk::sysvar::rent::Rent::default();

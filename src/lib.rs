@@ -24,7 +24,7 @@ use instructions::{
 };
 use config::*;
 
-declare_id!("rjdfmKCfMe1BHBffDqwhhVjTbkYV9YEVXsiMM9pEVcw");
+declare_id!("BHXSSPSY1DqDbLGUhf33bTRd8jxhNvGatqGNR14Huxwc");
 
 #[cfg(all(not(feature = "std"), not(feature = "no-entrypoint")))]
 mod entrypoint {

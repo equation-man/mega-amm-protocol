@@ -49,3 +49,21 @@ an imbalanced withdrawal where a solver is required as it performs a virtual swa
 - In imbalanced withdrawal, the protocol calculates the invariant after removing user's share value.
 - Protocol uses Newton solver to find how much tokens must remain in the pool to satify the target D(liquidity).
 - The difference is sent to the user.
+
+## Development Deployment (Devnet)  
+**Network:**
+Solana Devnet  
+**Program ID:**  
+```
+BHXSSPSY1DqDbLGUhf33bTRd8jxhNvGatqGNR14Huxwc
+```
+**Verify on Solana Explorer:**
+[MegaSwap on Solana Explorere](https://explorer.solana.com/address/BHXSSPSY1DqDbLGUhf33bTRd8jxhNvGatqGNR14Huxwc/idl?cluster=devnet)
+
+## Interface Definition Languate (IDL)  
+The latest IDL is located at:  
+```
+idl/mega_amm_protocol.json
+```
+Generate clients using this IDL.
+
