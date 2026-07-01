@@ -1,0 +1,447 @@
+{
+  "version": "0.1.0",
+  "name": "mega_amm_protocol",
+  "instructions": [
+    {
+      "name": "Initialize",
+      "accounts": [
+        {
+          "name": "initializer",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "Protocol authority"
+          ]
+        },
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Configuration PDA account"
+          ]
+        },
+        {
+          "name": "vaultXAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "ATA vault for token x"
+          ]
+        },
+        {
+          "name": "vaultYAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "ATA vault for token y"
+          ]
+        },
+        {
+          "name": "mintX",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token mint for token x"
+          ]
+        },
+        {
+          "name": "mintY",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token mint for token y"
+          ]
+        },
+        {
+          "name": "mintLp",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token mint for the tokens given to LPs to rep pool's liquidity"
+          ]
+        },
+        {
+          "name": "ataTokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "ATA program used in creating the ata"
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "System program used in creating PDAs"
+          ]
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "Token program"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "seed",
+          "type": "u64"
+        },
+        {
+          "name": "fee",
+          "type": "u16"
+        },
+        {
+          "name": "mintX",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "mintY",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "configBump",
+          "type": {
+            "array": [
+              "u8",
+              1
+            ]
+          }
+        },
+        {
+          "name": "lpMintDecimals",
+          "type": "u8"
+        },
+        {
+          "name": "lpBump",
+          "type": {
+            "array": [
+              "u8",
+              1
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ],
+      "discriminant": {
+        "type": "u8",
+        "value": 0
+      }
+    },
+    {
+      "name": "Deposit",
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "User depositing token to provide liquidity"
+          ]
+        },
+        {
+          "name": "vaultX",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token account that holds token x deposited"
+          ]
+        },
+        {
+          "name": "vaultY",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token account that holds token y deposited"
+          ]
+        },
+        {
+          "name": "userXAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "User ata for token x"
+          ]
+        },
+        {
+          "name": "userYAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "User ata for token y"
+          ]
+        },
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Protocol config account"
+          ]
+        },
+        {
+          "name": "mintLp",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Mint account for the pool liquidity tokens"
+          ]
+        },
+        {
+          "name": "userLpAta",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "User ATA for LP tokens"
+          ]
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "Token program"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amountX",
+          "type": "u64"
+        },
+        {
+          "name": "amountY",
+          "type": "u64"
+        },
+        {
+          "name": "expiration",
+          "type": "i64"
+        }
+      ],
+      "discriminant": {
+        "type": "u8",
+        "value": 1
+      }
+    },
+    {
+      "name": "Swap",
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "User who wants to perform the swap"
+          ]
+        },
+        {
+          "name": "vaultX",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Holds all token x deposited into the pool"
+          ]
+        },
+        {
+          "name": "vaultY",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Holds all token y deposited into the pool"
+          ]
+        },
+        {
+          "name": "userXAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Sends or receives token x"
+          ]
+        },
+        {
+          "name": "userYAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Sends or receives token y"
+          ]
+        },
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Protocol configuration account"
+          ]
+        },
+        {
+          "name": "mintLp",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Mint account for the pool liquidity tokens"
+          ]
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "Token program"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minOut",
+          "type": "u64"
+        },
+        {
+          "name": "expiration",
+          "type": "i64"
+        },
+        {
+          "name": "isX",
+          "type": "u8"
+        }
+      ],
+      "discriminant": {
+        "type": "u8",
+        "value": 2
+      }
+    },
+    {
+      "name": "Withdraw",
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "User depositing token to provide liquidity"
+          ]
+        },
+        {
+          "name": "mintLp",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Mint account for the pool liquidity tokens"
+          ]
+        },
+        {
+          "name": "vaultX",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token account that holds token x deposited"
+          ]
+        },
+        {
+          "name": "vaultY",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Token account that holds token y deposited"
+          ]
+        },
+        {
+          "name": "userXAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "User ata for token x"
+          ]
+        },
+        {
+          "name": "userYAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "User ata for token y"
+          ]
+        },
+        {
+          "name": "userLpAta",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "User ata that holds lp tokens"
+          ]
+        },
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Protocol config account"
+          ]
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "Token program"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "lpToBurn",
+          "type": "u64"
+        },
+        {
+          "name": "amountOfX",
+          "type": "u64"
+        },
+        {
+          "name": "amountOfY",
+          "type": "i64"
+        },
+        {
+          "name": "expiration",
+          "type": "i64"
+        },
+        {
+          "name": "withdrawMode",
+          "type": "u8"
+        }
+      ],
+      "discriminant": {
+        "type": "u8",
+        "value": 3
+      }
+    }
+  ],
+  "metadata": {
+    "origin": "shank",
+    "address": "rjdfmKCfMe1BHBffDqwhhVjTbkYV9YEVXsiMM9pEVcw"
+  }
+}
