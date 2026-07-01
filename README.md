@@ -1,26 +1,28 @@
-# Mega AMM protocol.
-##### Technologies: Rust, Solana, Pinocchio  
+# The MegaSwap protocol.
+##### Technologies: Rust, Solana, Pinocchio, LiteSVM  
 [*Inside DeFi protocols beyond the AMM curves. Engineering StableSwap invariant*](https://medium.com/@EquationManTheBlueBeetle/inside-defi-protocols-beyond-the-amm-curves-engineering-the-stableswap-invariant-in-rust-560eb8b21706)  
 
 ## Overview:  
-This is a stableswap based high performance Automated Market Maker (AMM) supporting two-token liquidity pools with full 
+This is a stableswap high performance Automated Market Maker (AMM) supporting two-token liquidity pools with full 
 lifecycle operations, that is, initialization, liquidity deposit, swaps and withdrawal.  
 A swap fee of bps is implemented to ensure liquidity providers are compensated for trades.  
-The swap is based on constant product curve.  
+The swap is based on StableSwap invariant.  
 Consider mathematical representation F(x, y) = k, where x is the reserve for token A and y is 
 the reserve for token B, k is the invariant.  
 The curve represents all possible (x, y) combinations that preseves or satisfies this invariant, hence, 
-F(x, y) = k, for CPMM(constant product market maker) like this we have, x*y = k.   
-You can find more about this in the medium article [Inside DeFi protocols beyond the AMM curves. Engineering StableSwap invariant](https://medium.com/@EquationManTheBlueBeetle/inside-defi-protocols-beyond-the-amm-curves-engineering-the-stableswap-invariant-in-rust-560eb8b21706)  
+F(x, y) = k.   
+You can find more about this in the medium article [The physics of liquidity. Engineering StableSwap invariant](https://medium.com/@EquationManTheBlueBeetle/inside-defi-protocols-beyond-the-amm-curves-engineering-the-stableswap-invariant-in-rust-560eb8b21706)  
   
 
 ## Design and engineering highlights:  
 - Safeguraded(with bisection) Newton-Raphson invariant solver for price discovery.
 - Safe integer arithmetic
+- Scaling factors
 - Market behaviour modelling
 - Unit tests and extensive property tests
 - Slippage and convexity handling
 - Imbalanced liquidity withdrawals
+- IDL generation with shank
 
 ## How it works:  
 #### Initialization  
