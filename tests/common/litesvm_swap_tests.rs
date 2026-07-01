@@ -53,14 +53,14 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
 
     // Build Swap Instruction Data
     let amount: u64 = swap_amount;
-    let min: u64 = slippage;
+    let min_out: u64 = slippage;
     let expiration: i64 = 1_800_000_000;
     let is_x: u8 = target_token; // swap X -> Y
 
     let mut data = Vec::with_capacity(26);
     data.push(3u8); // Swap discriminator (must match on-chain)
     data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&min.to_le_bytes());
+    data.extend_from_slice(&min_out.to_le_bytes());
     data.extend_from_slice(&expiration.to_le_bytes());
     data.push(is_x);
 
@@ -174,14 +174,14 @@ pub fn zero_amount_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u6
 
     // Build Swap Instruction with zero amount
     let amount: u64 = swap_amount; // critical test condition, amount is zero.
-    let min: u64 = slippage;
+    let min_out: u64 = slippage;
     let expiration: i64 = 1_800_000_000;
     let is_x: u8 = target_token;
 
     let mut data = Vec::with_capacity(26);
     data.push(3u8); // Swap discriminator
     data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&min.to_le_bytes());
+    data.extend_from_slice(&min_out.to_le_bytes());
     data.extend_from_slice(&expiration.to_le_bytes());
     data.push(is_x);
 
@@ -291,14 +291,14 @@ pub fn slippage_protected_swap(ctx: &mut AmmTestContext, swap_amount: u64, slipp
 
     // Build Swap Instruction with zero amount
     let amount: u64 = swap_amount; // critical test condition, amount is zero.
-    let min: u64 = slippage;
+    let min_out: u64 = slippage;
     let expiration: i64 = 1_800_000_000;
     let is_x: u8 = target_token;
 
     let mut data = Vec::with_capacity(26);
     data.push(3u8); // Swap discriminator
     data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&min.to_le_bytes());
+    data.extend_from_slice(&min_out.to_le_bytes());
     data.extend_from_slice(&expiration.to_le_bytes());
     data.push(is_x);
 

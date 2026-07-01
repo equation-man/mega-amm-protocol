@@ -25,6 +25,7 @@ pub struct SwapAccounts<'info> {
     pub user_y_ata: &'info AccountView,
     // Configuration account for the AMM pool.
     pub config: &'info AccountView,
+    // The mint for lp tokens.
     pub mint_lp: &'info AccountView,
     // SPL token program account.
     pub token_program: &'info AccountView,
@@ -58,7 +59,8 @@ impl<'info> TryFrom<&'info [AccountView]> for SwapAccounts<'info> {
 
 pub struct SwapInstructionData {
     pub amount: u64, // Amount to swap
-    pub min: u64, // Minimum slippage. Min to receive below which it's bad pricing
+    pub min_out: u64, // Minimum slippage. Min to receive below which it's bad pricing
+    // Time duration the transaction should take or should not wait beyond
     pub expiration: i64,
     pub is_x: u8, // Swap being performed from token X to Y, bool value (1 or 0)
 }
@@ -71,11 +73,11 @@ impl<'info> TryFrom<&'info [u8]> for SwapInstructionData {
         }
 
         let amount = u64::from_le_bytes(data[0..8].try_into().unwrap());
-        let min = u64::from_le_bytes(data[8..16].try_into().unwrap());
+        let min_out = u64::from_le_bytes(data[8..16].try_into().unwrap());
         let expiration = i64::from_le_bytes(data[16..24].try_into().unwrap());
         let is_x = data[24];
 
-        if amount <= 0 || min <= 0 {
+        if amount <= 0 || min_out <= 0 {
             return Err(MegaAmmProgramError::InvalidInstructionData.into());
         }
         if is_x != 0 && is_x != 1 {
@@ -83,7 +85,7 @@ impl<'info> TryFrom<&'info [u8]> for SwapInstructionData {
         }
 
         Ok(Self {
-            amount, min, expiration, is_x,
+            amount, min_out, expiration, is_x,
         })
     }
 }
@@ -159,7 +161,7 @@ impl<'info> Swap<'info> {
             // if final_amount > 
 
             // Slippage protection.
-            if final_amount < self.instruction_data.min {
+            if final_amount < self.instruction_data.min_out {
                 return Err(MegaAmmProgramError::SlippageExceeded.into());
             }
 
@@ -197,7 +199,7 @@ impl<'info> Swap<'info> {
             ).map_err(|_| ProgramError::Custom(2))?;
 
             // Slippage protection.
-            if final_amount < self.instruction_data.min {
+            if final_amount < self.instruction_data.min_out {
                 return Err(MegaAmmProgramError::SlippageExceeded.into());
             }
 

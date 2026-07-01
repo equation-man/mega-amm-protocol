@@ -82,7 +82,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn prop_extreme_imbalance_pool_behavior(
         // Dominant reserve
         dominant_reserve in 1_000_000u64..50_000_000u64,
@@ -119,6 +118,7 @@ proptest! {
     }
 
     #[test]
+    #[ignore]
     fn prop_normal_market_pool_behavior(
         // Normal market conditions
         // Pools are relatively balanced.

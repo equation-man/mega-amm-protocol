@@ -15,14 +15,23 @@ use crate::helpers::math_procs::numerical_ops::get_d;
 use crate::config::{Config, AmmState};
 
 pub struct WithdrawAccounts<'info> {
+    // User withdrawing funds
     pub user: &'info AccountView,
+    // The token mint for lp tokens
     pub mint_lp: &'info AccountView,
+    // Vault holding reserve for token x
     pub vault_x: &'info AccountView,
+    // Vault holding reserve for token y
     pub vault_y: &'info AccountView,
+    // User's ATA for token x
     pub user_x_ata: &'info AccountView,
+    // User's ATA for token y
     pub user_y_ata: &'info AccountView,
+    // User's ATA holding the lp tokens
     pub user_lp_ata: &'info AccountView,
+    // The protocol's config account
     pub config: &'info AccountView,
+    // The token program
     pub token_program: &'info AccountView,
 }
 
@@ -55,10 +64,15 @@ impl<'info> TryFrom<&'info [AccountView]> for WithdrawAccounts<'info> {
 
 #[repr(C)]
 pub struct WithdrawInstructionData {
+    // The amount of lp tokens to burn. This is for equal withdrawal
     pub lp_to_burn: u64,
+    // Amount of token x to withdraw on one sided withdrawal. 0 for equal withdrawal
     pub amount_of_x: u64,
+    // Amount of token y to withdraw on one sided withdrawal. 0 for equal withdrawal
     pub amount_of_y: u64,
+    // The duration that the transaction is valid. Beyond this time, transfer is not valid.
     pub expiration: i64,
+    // Withdraw mode, whether its balanced withdrawal or one sided.
     pub withdraw_mode: u8,
 }
 
