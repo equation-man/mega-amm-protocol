@@ -9,7 +9,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use pinocchio_token;
 use pinocchio_token::state::Mint;
-use mega_amm_protocol::config::Config;
+use megaswap_protocol::config::Config;
 use solana_sdk::{
     pubkey::Pubkey, account::Account,
     instruction::{AccountMeta, Instruction},

@@ -1,2 +1,5 @@
-/target
-program-keypair.json
+# Ignore all target directories anywhere in the workspace
+**/target/
+target/
+# Ignore sensitive keypairs anywhere
+**/*-keypair.json
