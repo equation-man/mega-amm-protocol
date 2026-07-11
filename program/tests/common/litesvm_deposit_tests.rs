@@ -62,13 +62,13 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext, x_amount: u64, y_amount: u64)
 
     let accounts = vec![
         AccountMeta::new(user.pubkey(), true),
+        AccountMeta::new(ctx.config_pda, false),
+        AccountMeta::new(ctx.lp_mint_pda, false),
+        AccountMeta::new(user_lp_ata, false),
         AccountMeta::new(ctx.vault_x_ata, false),
         AccountMeta::new(ctx.vault_y_ata, false),
         AccountMeta::new(user_x_ata, false),
         AccountMeta::new(user_y_ata, false),
-        AccountMeta::new(ctx.config_pda, false),
-        AccountMeta::new(ctx.lp_mint_pda, false),
-        AccountMeta::new(user_lp_ata, false),
         AccountMeta::new_readonly(pinocchio_token::ID, false),
     ];
 
@@ -85,7 +85,7 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext, x_amount: u64, y_amount: u64)
     );
 
     let res = ctx.svm.send_transaction(tx);
-    //println!("The deposit result is {:#?}", res);
+    println!("The deposit result is {:#?}", res);
     
     let liquidity_pool = get_token_balance(&ctx.svm, &user_lp_ata);
     println!("The liquidity pool total token balance is {}", liquidity_pool);

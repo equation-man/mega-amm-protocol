@@ -45,6 +45,7 @@ pub struct InitializeAccounts<'a> {
 impl<'a> TryFrom<&'a [AccountView]> for InitializeAccounts<'a> {
     type Error = MegaAmmProgramError;
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+        // Follows the order they are from the client
         let [
             initializer, 
             vault_x_ata, vault_y_ata,
@@ -118,7 +119,6 @@ pub struct Initialize<'a> {
 impl<'a> TryFrom<(&'a [u8], &'a [AccountView])> for Initialize<'a> {
     type Error = MegaAmmProgramError;
     fn try_from((data, accounts): (&'a [u8], &'a [AccountView])) -> Result<Self, Self::Error> {
-        log!("Deserializing accounts");
         let accounts = InitializeAccounts::try_from(accounts)?;
         let instruction_data = InitializeInstructionData::try_from(data)?;
         Ok(Self {accounts, instruction_data})
@@ -131,16 +131,13 @@ impl<'a> Initialize<'a> {
         // Initialize Config account and store all the config information.
         // Create the mint_lp Mint account and assign the mint_authority to the Config account.
         // Creating the config (pool).
-        log!("Initialize process");
         let seed_binding = self.instruction_data.seed.to_le_bytes();
         let conf_bump_binding = self.instruction_data.config_bump;
-        log!("Initialize config signer seeds");
         let config_signer_seeds = [
             Seed::from(b"config"),
             Seed::from(&conf_bump_binding),
         ];
         let signer_seeds = [Signer::from(&config_signer_seeds)];
-        log!("Creating config pda");
         ProgramAccount::init::<Config>(
             self.accounts.initializer,
             self.accounts.config,

@@ -116,7 +116,7 @@ pub fn setup_initialized_amm() -> AmmTestContext {
     );
 
     let tx_init = svm.send_transaction(tx);
-    println!("The amm initialization is {:#?}", tx_init);
+    //println!("The amm initialization is {:#?}", tx_init);
 
     AmmTestContext {
         svm,
