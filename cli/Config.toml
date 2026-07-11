@@ -1,0 +1,5 @@
+# megaswap-cli configurations.
+megaswap_protocol_program_id = "HBfwxFs8KL5993jCpzY95A9EYJkHMsYy2YMDVP1Jq3Zy"
+rpc_url = "https://api.devnet.solana.com"
+test_wallet_directory = "./wallets"
+protocol_version = 1
