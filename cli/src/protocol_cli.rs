@@ -7,7 +7,6 @@ use solana_sdk::{
     transaction::Transaction,
     instruction::{AccountMeta, Instruction},
     hash::Hash,
-    system_instruction,
 };
 use shellexpand;
 use spl_token;
@@ -17,6 +16,9 @@ use toml;
 use serde::Deserialize;
 use solana_client::rpc_client::{RpcClient};
 use solana_commitment_config::CommitmentConfig;
+use solana_system_interface::instruction as system_instruction;
+use spl_token::instruction::initialize_mint;
+use solana_program::program_pack::Pack;
 use spl_associated_token_account::{
     get_associated_token_address,
 };
@@ -163,8 +165,28 @@ pub fn ensure_protocol_ready(seed: u64, fee: u16) -> anyhow::Result<()> {
             let initializer = read_keypair_file(
                 shellexpand::tilde("~/.config/solana/id.json").to_string()
             ).map_err(|e| anyhow::anyhow!("{}", e))?;
+            let recent_blockhash: Hash = rpc_client.get_latest_blockhash()?;
+
+            // Preparing the trade token mints.
+            // Creating accounts owned by the token program
+            let rent = rpc_client.get_minimum_balance_for_rent_exemption(spl_token::state::Mint::LEN)?;
             let mint_x_keypair = load_or_create_wallet("wallets/mint_x.json")?;
+            let create_mint_x = system_instruction::create_account(
+                &initializer.pubkey(), &mint_x_keypair.pubkey(), rent,
+                spl_token::state::Mint::LEN as u64, &spl_token::id(),
+            );
             let mint_y_keypair = load_or_create_wallet("wallets/mint_y.json")?;
+            let create_mint_y = system_instruction::create_account(
+                &initializer.pubkey(), &mint_y_keypair.pubkey(), rent,
+                spl_token::state::Mint::LEN as u64, &spl_token::id()
+            );
+            // Initializing the token mints.
+            let init_mint_x = initialize_mint(
+                &spl_token::id(), &mint_x_keypair.pubkey(), &initializer.pubkey(), None, 6,
+            )?;
+            let init_mint_y = initialize_mint(
+                &spl_token::id(), &mint_y_keypair.pubkey(), &initializer.pubkey(), None, 6
+            )?;
 
             // Computing the deterministic ATA. Token vaults held by PDAs
             let vault_x_ata = get_associated_token_address(
@@ -200,9 +222,18 @@ pub fn ensure_protocol_ready(seed: u64, fee: u16) -> anyhow::Result<()> {
                 accounts: accounts,
                 data: ix_data
             };
-            let recent_blockhash: Hash = rpc_client.get_latest_blockhash()?;
+            // Constructing the transaction
             let init_tx = Transaction::new_signed_with_payer(
-                &[init_ix], Some(&initializer.pubkey()), &[&initializer], recent_blockhash
+                &[
+                    create_mint_x,
+                    init_mint_x,
+                    create_mint_y,
+                    init_mint_y,
+                    init_ix
+                ],
+                Some(&initializer.pubkey()),
+                &[&initializer, &mint_x_keypair, &mint_y_keypair],
+                recent_blockhash
             );
             rpc_client.send_and_confirm_transaction(&init_tx)?;
             println!("Protocol initialized successfully...");
