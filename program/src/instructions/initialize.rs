@@ -46,11 +46,12 @@ impl<'a> TryFrom<&'a [AccountView]> for InitializeAccounts<'a> {
     type Error = MegaAmmProgramError;
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [
-            initializer, vault_x_ata, vault_y_ata,
+            initializer, 
+            vault_x_ata, vault_y_ata,
             mint_x, mint_y,
             mint_lp, config, ata_token_program,
             system_program,
-            token_program, _rem_data @ ..
+            token_program,
         ] = accounts else {
             return Err(MegaAmmProgramError::InvalidAccountData.into());
         };
@@ -61,9 +62,11 @@ impl<'a> TryFrom<&'a [AccountView]> for InitializeAccounts<'a> {
         //ProgramAccount::check(config)?;
         
         Ok(Self {
-            initializer, vault_x_ata, vault_y_ata,
-            mint_x, mint_y, mint_lp, config, ata_token_program,
-            system_program, token_program
+            initializer: initializer,
+            vault_x_ata: vault_x_ata, vault_y_ata: vault_y_ata,
+            mint_x: mint_x, mint_y: mint_y, mint_lp: mint_lp,
+            config: config, ata_token_program: ata_token_program,
+            system_program: system_program, token_program: token_program
         })
     }
 }
@@ -115,6 +118,7 @@ pub struct Initialize<'a> {
 impl<'a> TryFrom<(&'a [u8], &'a [AccountView])> for Initialize<'a> {
     type Error = MegaAmmProgramError;
     fn try_from((data, accounts): (&'a [u8], &'a [AccountView])) -> Result<Self, Self::Error> {
+        log!("Deserializing accounts");
         let accounts = InitializeAccounts::try_from(accounts)?;
         let instruction_data = InitializeInstructionData::try_from(data)?;
         Ok(Self {accounts, instruction_data})
@@ -127,16 +131,16 @@ impl<'a> Initialize<'a> {
         // Initialize Config account and store all the config information.
         // Create the mint_lp Mint account and assign the mint_authority to the Config account.
         // Creating the config (pool).
+        log!("Initialize process");
         let seed_binding = self.instruction_data.seed.to_le_bytes();
         let conf_bump_binding = self.instruction_data.config_bump;
+        log!("Initialize config signer seeds");
         let config_signer_seeds = [
             Seed::from(b"config"),
-            Seed::from(&seed_binding),
-            Seed::from(self.instruction_data.mint_x.as_ref()),
-            Seed::from(self.instruction_data.mint_y.as_ref()),
             Seed::from(&conf_bump_binding),
         ];
         let signer_seeds = [Signer::from(&config_signer_seeds)];
+        log!("Creating config pda");
         ProgramAccount::init::<Config>(
             self.accounts.initializer,
             self.accounts.config,
@@ -189,6 +193,8 @@ impl<'a> Initialize<'a> {
             Seed::from(&lp_mint_bump_binding),
         ];
         let mint_signer = [Signer::from(&mint_signer_seeds)];
+        // Confirm if the supplied mint address is similar to the derived(expected_mint_lp)
+        // address check before Mint init.
         MintAccount::init(
             self.accounts.mint_lp,
             self.accounts.initializer,

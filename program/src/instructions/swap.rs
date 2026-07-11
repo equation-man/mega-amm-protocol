@@ -135,9 +135,6 @@ impl<'info> Swap<'info> {
         let conf_bump_binding = amm_config.config_bump();
         let config_signer_seeds = [
             Seed::from(b"config"),
-            Seed::from(&seed_binding),
-            Seed::from(amm_config.mint_x().as_ref()),
-            Seed::from(amm_config.mint_y().as_ref()),
             Seed::from(&conf_bump_binding),
         ];
         let signer_seeds = [Signer::from(&config_signer_seeds)];

@@ -30,8 +30,8 @@ use spl_token::solana_program::program_option::COption;
 use crate::common::context::{AmmTestContext};
 
 pub fn setup_initialized_amm() -> AmmTestContext {
-    let program_id = solana_sdk::pubkey!("BHXSSPSY1DqDbLGUhf33bTRd8jxhNvGatqGNR14Huxwc");
-    let bytes = include_bytes!("../../target/deploy/mega_amm_protocol.so");
+    let program_id = solana_sdk::pubkey!("HBfwxFs8KL5993jCpzY95A9EYJkHMsYy2YMDVP1Jq3Zy");
+    let bytes = include_bytes!("../../../target/deploy/megaswap_protocol.so");
 
     let rent = solana_sdk::sysvar::rent::Rent::default();
     let initializer = Keypair::new();
@@ -46,7 +46,7 @@ pub fn setup_initialized_amm() -> AmmTestContext {
     let mint_y = create_test_mint(&mut svm, &initializer, &initializer.pubkey(), 6); 
 
     let (config_pda, config_bump) = Pubkey::find_program_address(
-        &[b"config", &seed.to_le_bytes(), mint_x.as_ref(), mint_y.as_ref()],
+        &[b"config"],
         &program_id,
     );
     let vault_x_ata = get_associated_token_address(&config_pda, &mint_x);
@@ -72,7 +72,7 @@ pub fn setup_initialized_amm() -> AmmTestContext {
     // config_bump
     instruction_data.push(config_bump);
     // lp_mint_decimals
-    instruction_data.push(9u8);
+    instruction_data.push(6u8);
     // lp bump
     instruction_data.push(lp_bump);
     // AMM admin authority
@@ -93,8 +93,15 @@ pub fn setup_initialized_amm() -> AmmTestContext {
         AccountMeta::new(ATA_PROGRAM_ID, false),
         AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         AccountMeta::new_readonly(pinocchio_token::ID, false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::ID, false),
+        //AccountMeta::new_readonly(solana_sdk::sysvar::rent::ID, false),
     ];
+    println!("The initializer is {}", initializer.pubkey());
+    println!("Config is {}", config_pda);
+    println!("The vaul_x_ata is {}", vault_x_ata);
+    println!("The vault_y_ata is {}", vault_y_ata);
+    println!("The mint_x is {}", mint_x);
+    println!("The mint_y is {}", mint_y);
+    println!("The mint_lp is {}", lp_mint_pda);
 
     let instruction = Instruction::new_with_bytes(
         program_id,
@@ -109,7 +116,7 @@ pub fn setup_initialized_amm() -> AmmTestContext {
     );
 
     let tx_init = svm.send_transaction(tx);
-    //println!("The amm initialization is {:#?}", tx_init);
+    println!("The amm initialization is {:#?}", tx_init);
 
     AmmTestContext {
         svm,
