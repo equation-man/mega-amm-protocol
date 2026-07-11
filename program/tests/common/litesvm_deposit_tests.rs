@@ -85,7 +85,7 @@ pub fn deposit_liquidity(ctx: &mut AmmTestContext, x_amount: u64, y_amount: u64)
     );
 
     let res = ctx.svm.send_transaction(tx);
-    println!("The deposit result is {:#?}", res);
+    //println!("The deposit result is {:#?}", res);
     
     let liquidity_pool = get_token_balance(&ctx.svm, &user_lp_ata);
     println!("The liquidity pool total token balance is {}", liquidity_pool);

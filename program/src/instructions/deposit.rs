@@ -58,23 +58,15 @@ impl<'info> TryFrom<&'info [AccountView]> for DepositAccounts<'info> {
             return Err(MegaAmmProgramError::InvalidAccountData.into());
         };
         // Checking the accounts.
-        log!("Signer check");
         SignerAccount::check(user)?;
-        log!("Mint check for mint_lp");
         MintInterface::check(mint_lp)?;
-        log!("Token x check");
         TokenInterface::check(vault_x)?;
-        log!("Token y check");
         TokenInterface::check(vault_y)?;
-        log!("ATA for mint_lp check");
         AssociatedTokenAccount::check(user_lp_ata, user, mint_lp.address(), token_program)?;
         // Check the config account and load it for mint checks.
-        log!("PDA check for config");
         ProgramAccount::check(config)?;
         let conf_state = Config::load(config)?;
-        log!("ATA check for user x ata");
         AssociatedTokenAccount::check(user_x_ata, user, conf_state.mint_x(), token_program)?;
-        log!("ATA check for user y ata");
         AssociatedTokenAccount::check(user_y_ata, user, conf_state.mint_y(), token_program)?;
 
         Ok(Self {
@@ -124,9 +116,7 @@ pub struct Deposit<'info> {
 impl<'info> TryFrom<(&'info [u8], &'info [AccountView])> for Deposit<'info> {
     type Error = MegaAmmProgramError;
     fn try_from((data, accounts): (&'info [u8], &'info [AccountView])) -> Result<Self, Self::Error> {
-        log!("Serializing accounts");
         let accounts = DepositAccounts::try_from(accounts)?;
-        log!("Deserializing data");
         let instruction_data = DepositInstructionData::try_from(data)?;
         // Returning the validated struct.
         Ok(Self {
@@ -146,7 +136,6 @@ impl<'info> Deposit<'info> {
             return Err(MegaAmmProgramError::Unauthorized.into());
         }
 
-        log!("Running deposit instruction");
         // Deserializing the token accounts. 
         // Context added to drop all borrows before the accounts are used again
         // for transfer instructions etc.

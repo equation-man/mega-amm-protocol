@@ -95,13 +95,6 @@ pub fn setup_initialized_amm() -> AmmTestContext {
         AccountMeta::new_readonly(pinocchio_token::ID, false),
         //AccountMeta::new_readonly(solana_sdk::sysvar::rent::ID, false),
     ];
-    println!("The initializer is {}", initializer.pubkey());
-    println!("Config is {}", config_pda);
-    println!("The vaul_x_ata is {}", vault_x_ata);
-    println!("The vault_y_ata is {}", vault_y_ata);
-    println!("The mint_x is {}", mint_x);
-    println!("The mint_y is {}", mint_y);
-    println!("The mint_lp is {}", lp_mint_pda);
 
     let instruction = Instruction::new_with_bytes(
         program_id,

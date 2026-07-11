@@ -109,7 +109,7 @@ pub fn normal_swap(ctx: &mut AmmTestContext, swap_amount: u64, slippage: u64, ta
 
     // Send transaction to the smart contract
     let result = svm.send_transaction(tx);
-    println!("Swap result: {:#?}", result);
+    //println!("Swap result: {:#?}", result);
 
     // Validate balances from the user's wallet
     let x_after_swap = get_token_balance(svm, &wallet_x_ata);

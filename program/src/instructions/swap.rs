@@ -116,7 +116,6 @@ impl<'info> Swap<'info> {
             return Err(MegaAmmProgramError::Unauthorized.into());
         }
 
-        log!("Executing swap instruction");
         // Deserializing token accounts.
         let (vault_x_amount, vault_y_amount, lp_supply) = {
             let mint_data_ref = self.accounts.mint_lp.try_borrow()?;
@@ -141,7 +140,6 @@ impl<'info> Swap<'info> {
         ];
         let signer_seeds = [Signer::from(&config_signer_seeds)];
 
-        log!("Swap instruction newton solver calc");
         // Swap calculations with newton solver stableswap
         // Balances should be in order, with the last representing token which is being swapped for
         let balances = [vault_y_amount, vault_x_amount];

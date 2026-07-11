@@ -11,6 +11,7 @@ use common::litesvm_swap_tests::{
 };
 
 #[test]
+#[ignore]
 fn test_basic_swap() {
     // =================== NORMAL SWAP TEST(Balanced pool) ========================
     // Near zero slippage expected with 1:1 exchange rate on a balanced stable pool
@@ -118,7 +119,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn prop_normal_market_pool_behavior(
         // Normal market conditions
         // Pools are relatively balanced.
